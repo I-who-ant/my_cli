@@ -1,349 +1,282 @@
-# 安装指南 - 两种方式任选
+# My CLI - 安装指南
 
-## 🎯 选择安装方式
+## 🎯 推荐方式：conda + uv 混合
 
-My CLI 支持两种安装方式，根据你的需求选择：
+结合 conda 的环境管理和 uv 的依赖管理，最佳实践！
 
-| 方式 | 适合场景 | 优势 | 劣势 |
-|------|---------|------|------|
-| **方案1：pip** | 快速上手、已有虚拟环境 | 简单快速 | 可能与其他项目冲突 |
-| **方案2：uv（推荐）** | 独立学习、多项目并存 | 完全隔离、速度快 | 需要额外激活 |
+### 为什么用 conda？
+- ✅ 环境有名字，提示符清晰 `(my_cli) $`
+- ✅ 统一管理：`conda env list` 查看所有环境
+- ✅ 你熟悉的工作流
 
----
-
-## 🚀 方案1：使用 pip（复用现有虚拟环境）
-
-### 适用场景
-- 你已经在一个虚拟环境中（如 `DeepLearning`）
-- 想快速开始学习
-- 不担心依赖冲突
-
-### 安装步骤
-
-```bash
-# 1. 确认在虚拟环境中
-(DeepLearning) $ echo $CONDA_DEFAULT_ENV
-DeepLearning
-
-# 2. 进入项目目录
-cd kimi-cli-main/imitate-src
-
-# 3. 安装
-pip install -e .
-
-# 或使用 Makefile
-make install
-```
-
-### 验证安装
-
-```bash
-# 查看命令位置
-which my_cli
-# 输出：/home/seeback/.conda/envs/DeepLearning/bin/my_cli
-
-# 运行测试
-my_cli --version
-my_cli -c "Hello World"
-```
-
-### 卸载
-
-```bash
-pip uninstall my-cli
-
-# 或使用 Makefile
-make uninstall
-```
-
----
-
-## 🌟 方案2：使用 uv（推荐 - 独立虚拟环境）
-
-### 适用场景
-- 你有多个项目在 `DeepLearning` 环境
-- 想要完全隔离的学习环境
-- 追求更快的安装速度
-
-### 安装步骤
-
-```bash
-# 1. 进入项目目录（可以在任何环境中）
-cd kimi-cli-main/imitate-src
-
-# 2. 使用 uv 创建虚拟环境并安装
-make prepare
-
-# 等价于手动执行：
-# pip install uv              # 如果没有 uv
-# uv sync                     # 创建 .venv/ 并安装
-
-# 3. 激活虚拟环境
-source .venv/bin/activate
-
-# 4. 验证安装
-which my_cli
-# 输出：/path/to/imitate-src/.venv/bin/my_cli
-
-my_cli --version
-```
-
-### 项目结构
-
-```
-kimi-cli-main/imitate-src/
-├── .venv/                    # uv 创建的虚拟环境
-│   ├── bin/
-│   │   └── my_cli            # my_cli 命令在这里
-│   ├── lib/
-│   └── ...
-├── my_cli/                   # 源代码
-├── pyproject.toml            # 项目配置（uv 使用）
-├── setup.py                  # 项目配置（pip 使用）
-└── Makefile                  # 便捷命令
-```
-
-### 日常使用
-
-```bash
-# 激活虚拟环境
-source .venv/bin/activate
-
-# 现在可以使用 my_cli
-my_cli -c "Hello World"
-
-# 退出虚拟环境
-deactivate
-```
-
-### 卸载
-
-```bash
-# 删除虚拟环境
-make clean-venv
-
-# 或手动删除
-rm -rf .venv
-```
-
----
-
-## 📊 两种方式的对比
-
-### 安装速度
-
-```bash
-# pip 方式
-pip install -e .                # 10-30 秒
-
-# uv 方式
-uv sync                         # 2-5 秒（快 5-10 倍！）
-```
-
-### 虚拟环境位置
-
-**pip 方式**：
-```
-/home/seeback/.conda/envs/DeepLearning/
-├── bin/
-│   └── my_cli                  # 与 DeepLearning 其他工具共存
-├── lib/
-└── ...
-```
-
-**uv 方式**：
-```
-kimi-cli-main/imitate-src/.venv/
-├── bin/
-│   └── my_cli                  # 完全独立
-├── lib/
-└── ...
-```
-
-### 激活方式
-
-**pip 方式**：
-```bash
-# 已经在 DeepLearning 环境中
-(DeepLearning) $ my_cli --help
-```
-
-**uv 方式**：
-```bash
-# 需要激活项目虚拟环境
-$ source .venv/bin/activate
-(.venv) $ my_cli --help
-
-# 退出
-(.venv) $ deactivate
-```
-
----
-
-## 🤔 如何选择？
-
-### 选择 pip（方案1），如果：
-- ✅ 你只学习这一个项目
-- ✅ 你想快速开始
-- ✅ 你不在意 DeepLearning 环境变"重"
-
-### 选择 uv（方案2），如果：
-- ✅ 你有多个项目在 DeepLearning 环境
-- ✅ 你想要干净的隔离环境
-- ✅ 你想体验 Kimi CLI 的安装方式
-- ✅ 你追求更快的安装速度
-
-**老王推荐**：方案2（uv）！就像 Kimi CLI 一样，独立环境更专业！
-
----
-
-## 🔧 常见问题
-
-### Q1: 我可以同时使用两种方式吗？
-
-**可以！但不推荐。**
-
-```bash
-# 会导致两个 my_cli 命令
-/home/seeback/.conda/envs/DeepLearning/bin/my_cli  # pip 安装
-/path/to/imitate-src/.venv/bin/my_cli              # uv 安装
-
-# 激活哪个环境就用哪个
-```
-
-### Q2: uv 比 pip 快在哪里？
-
-**uv 的优势**：
-1. **Rust 实现**：比 Python 写的 pip 快 10-100 倍
-2. **并行下载**：同时下载多个包
-3. **智能缓存**：已下载的包不重复下载
-4. **锁定依赖**：uv.lock 精确记录版本
-
-```bash
-# pip 安装（串行）
-下载 click → 安装 click → 完成
-    ↓ 约 10 秒
-
-# uv 安装（并行）
-下载 click → 完成
-    ↓ 约 2 秒
-```
-
-### Q3: pyproject.toml vs setup.py 有什么区别？
-
-**pyproject.toml**（现代方式）：
-```toml
-[project]
-name = "my-cli"
-version = "0.1.0"
-dependencies = ["click>=8.1.0"]
-
-[project.scripts]
-my_cli = "my_cli.cli:my_cli"
-```
-
-**setup.py**（传统方式）：
-```python
-setup(
-    name="my-cli",
-    version="0.1.0",
-    install_requires=["click>=8.1.0"],
-    entry_points={
-        "console_scripts": [
-            "my_cli=my_cli.cli:my_cli",
-        ],
-    },
-)
-```
-
-**两者功能相同！** uv 和 pip 都能读取 pyproject.toml。
-
-### Q4: 我用了 uv，还能用 pip 吗？
-
-**完全可以！**
-
-```bash
-# 激活 uv 创建的虚拟环境
-source .venv/bin/activate
-
-# 里面也有 pip
-pip list
-pip install some-package
-
-# uv 和 pip 可以混用
-```
-
-### Q5: 如何切换环境？
-
-```bash
-# 当前在 DeepLearning 环境
-(DeepLearning) $ which my_cli
-/home/seeback/.conda/envs/DeepLearning/bin/my_cli
-
-# 切换到 uv 环境
-(DeepLearning) $ conda deactivate
-$ cd kimi-cli-main/imitate-src
-$ source .venv/bin/activate
-
-# 现在在 uv 环境
-(.venv) $ which my_cli
-/path/to/imitate-src/.venv/bin/my_cli
-```
-
----
-
-## 📝 Makefile 命令速查
-
-### 方案1（pip）
-```bash
-make install      # 安装
-make uninstall    # 卸载
-```
-
-### 方案2（uv）
-```bash
-make prepare      # 创建 .venv/ 并安装
-make activate     # 显示激活命令
-make clean-venv   # 删除 .venv/
-```
-
-### 通用命令
-```bash
-make help         # 显示帮助
-make test         # 测试命令
-make clean        # 清理缓存
-```
-
----
-
-## 🎓 学习建议
-
-**初学者**：
-1. 先用**方案1（pip）**快速上手
-2. 理解基本概念后
-3. 再切换到**方案2（uv）**体验专业工作流
-
-**有经验者**：
-直接用**方案2（uv）**，体验现代 Python 开发！
+### 为什么用 uv？
+- ✅ 依赖管理快（比 pip 快 10-100 倍）
+- ✅ 锁定版本（`uv.lock` 确保一致性）
+- ✅ 对标 Kimi CLI 的专业工作流
 
 ---
 
 ## 🚀 快速开始
 
-### 方案1（pip - 最快）
+### 步骤 1：创建 conda 环境
+
 ```bash
-cd kimi-cli-main/imitate-src
-make install
-my_cli -c "Hello World"
+# 创建专门的环境
+conda create -n my_cli python=3.10
+
+# 激活环境
+conda activate my_cli
+
+# 提示符变成：
+(my_cli) [seeback@seeback ~]$
 ```
 
-### 方案2（uv - 推荐）
+### 步骤 2：安装 uv
+
 ```bash
-cd kimi-cli-main/imitate-src
-make prepare
-source .venv/bin/activate
-my_cli -c "Hello World"
+# 在 my_cli 环境中安装 uv
+(my_cli) $ pip install uv
+
+# 验证安装
+(my_cli) $ uv --version
 ```
+
+### 步骤 3：安装项目
+
+```bash
+# 进入项目目录
+(my_cli) $ cd /path/to/kimi-cli-main/imitate-src
+
+# 使用 uv 安装依赖
+(my_cli) $ uv sync
+
+# 或使用 Makefile
+(my_cli) $ make prepare
+```
+
+### 步骤 4：验证安装
+
+```bash
+# 查看命令位置
+(my_cli) $ which my_cli
+/home/seeback/.conda/envs/my_cli/bin/my_cli
+
+# 测试命令
+(my_cli) $ my_cli --version
+my_cli, version 0.1.0
+
+# 运行测试
+(my_cli) $ my_cli -c "Hello World"
+```
+
+---
+
+## 📂 环境结构
+
+```
+conda 环境位置：
+~/.conda/envs/my_cli/
+├── bin/
+│   ├── python
+│   ├── pip
+│   ├── uv
+│   └── my_cli          # ← 命令安装在这里
+├── lib/
+└── ...
+
+项目目录（代码）：
+/path/to/kimi-cli-main/imitate-src/
+├── my_cli/             # 源代码
+├── pyproject.toml      # 项目配置
+├── uv.lock             # 依赖锁定文件（uv 生成）
+└── Makefile
+```
+
+**关键点**：
+- 环境在 `~/.conda/envs/my_cli/`（conda 管理）
+- 代码在项目目录（方便编辑）
+- uv.lock 记录精确的依赖版本
+
+---
+
+## 🔄 日常使用
+
+### 激活环境
+
+```bash
+# 每次新终端都需要激活
+conda activate my_cli
+(my_cli) $
+
+# 现在可以直接用
+(my_cli) $ my_cli --help
+```
+
+### 退出环境
+
+```bash
+(my_cli) $ conda deactivate
+$
+```
+
+### 切换项目
+
+```bash
+# 在 my_cli 环境中
+(my_cli) $ cd ~/other-project
+
+# 环境还是 my_cli
+(my_cli) $ # 如果想用其他环境
+(my_cli) $ conda deactivate
+$ conda activate other_env
+```
+
+---
+
+## 🎓 与纯 uv 方式对比
+
+### 纯 uv 方式（Kimi CLI 原版）
+
+```bash
+# 1. 在项目目录创建 .venv/
+cd project
+uv sync
+
+# 2. 激活（每次）
+source .venv/bin/activate
+
+# 提示符：
+(.venv) $  # ← 看不出是哪个项目
+```
+
+### conda + uv 方式（推荐）
+
+```bash
+# 1. 创建 conda 环境（一次）
+conda create -n my_cli python=3.10
+
+# 2. 激活
+conda activate my_cli
+
+# 提示符：
+(my_cli) $  # ← 清楚地知道在 my_cli 环境
+```
+
+**对比**：
+
+| 特性 | 纯 uv (.venv) | conda + uv |
+|------|--------------|-----------|
+| 提示符 | `(.venv) $` | `(my_cli) $` |
+| 环境位置 | 项目目录 | `~/.conda/envs/` |
+| 查看环境 | 无 | `conda env list` |
+| 识别度 | 低 | 高 |
+
+---
+
+## 🛠️ Makefile 命令
+
+```bash
+# 安装依赖（自动检测 uv）
+make prepare
+
+# 测试命令
+make test
+
+# 清理缓存
+make clean
+
+# 查看帮助
+make help
+```
+
+**注意**：Makefile 会自动检测是否在 conda 环境中，不会创建 `.venv/`！
+
+---
+
+## ❓ 常见问题
+
+### Q1: 我必须用 uv 吗？
+
+**不是！你也可以只用 conda：**
+
+```bash
+conda create -n my_cli python=3.10
+conda activate my_cli
+(my_cli) $ cd imitate-src
+(my_cli) $ pip install -e .  # 不用 uv
+```
+
+但 uv 更快，推荐尝试！
+
+### Q2: 如果我不想用 conda 呢？
+
+**可以！纯 uv 方式：**
+
+```bash
+cd imitate-src
+uv sync
+source .venv/bin/activate
+```
+
+但提示符只显示 `(.venv)`，不如 conda 清晰。
+
+### Q3: uv.lock 是什么？
+
+**依赖锁定文件**，记录精确版本：
+
+```toml
+# uv.lock 示例
+[[package]]
+name = "click"
+version = "8.1.7"
+source = { registry = "https://pypi.org/simple" }
+```
+
+作用：
+- 团队协作：所有人版本一致
+- 可重现：随时恢复相同环境
+
+### Q4: 为什么提示符很重要？
+
+```bash
+# 场景：你有多个项目
+(DeepLearning) $ cd project1  # 搞不清是哪个项目
+(DeepLearning) $ cd project2
+
+# vs
+
+(my_cli) $ cd other-project  # 清楚知道在 my_cli 环境
+(other_env) $ cd another      # 切换了环境，提示符变化
+```
+
+### Q5: conda 环境会占用很多空间吗？
+
+```bash
+# 查看环境大小
+du -sh ~/.conda/envs/my_cli
+# 大约 200-500 MB（取决于依赖）
+
+# 删除环境
+conda env remove -n my_cli
+```
+
+---
+
+## 📝 总结
+
+### 推荐方案：conda + uv
+
+1. **创建**：`conda create -n my_cli python=3.10`
+2. **激活**：`conda activate my_cli`
+3. **安装 uv**：`pip install uv`
+4. **安装项目**：`uv sync`
+5. **使用**：`my_cli --help`
+
+**优势**：
+- ✅ 环境有清晰名字
+- ✅ conda 统一管理
+- ✅ uv 快速依赖管理
+- ✅ 两者优势结合
 
 ---
 
