@@ -25,6 +25,7 @@ venv/
 ENV/
 env/
 .venv
+.venv/       # uv 创建的虚拟环境目录
 
 # IDEs
 .vscode/
@@ -46,3 +47,6 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# uv
+uv.lock      # uv 依赖锁定文件（可选提交，团队项目建议提交）
