@@ -7,10 +7,31 @@
 3. 理解依赖注入模式
 
 对应源码：kimi-cli-main/src/kimi_cli/app.py (265 行)
+
+阶段演进：
+- Stage 2-3：基础应用框架 ✅
+  * MyCLI 类定义
+  * 工作目录管理
+  * run_print_mode() / run_shell_mode() 入口
+
+- Stage 4-5：Soul 引擎集成 ✅
+  * 集成 create_soul() 工厂函数
+  * 移除模拟模式（官方没有这个概念）
+  * 直接调用真实 LLM API
+
+- Stage 6：完整应用层（待实现）
+  * Session 管理（会话持久化）
+  * Config 管理（配置加载）
+  * 异步 create() 工厂方法
+  * 支持多种 UI 模式（shell/print/acp/wire）
+
+- Stage 7+：高级特性（待实现）
+  * MCP 工具配置
+  * Approval 系统
+  * Thinking 模式
 """
 
 from pathlib import Path
-from typing import Any
 
 
 class MyCLI:
@@ -20,6 +41,11 @@ class MyCLI:
     1. 管理工作目录
     2. 存储用户配置
     3. 提供统一的 UI 入口
+
+    阶段演进：
+    - Stage 2-3：基础框架 ✅
+    - Stage 4-5：Soul 集成 ✅
+    - Stage 6+：完整应用层（Session/Config/多UI模式）
     """
 
     def __init__(
@@ -48,16 +74,28 @@ class MyCLI:
         - create 可以执行异步初始化任务（如加载配置、连接 LLM）
 
         对应源码：kimi-cli-main/src/kimi_cli/app.py:24
-        原项目的 create 方法做了很多事：
+
+        Stage 2-5 实现：
+        - 验证工作目录
+        - 创建应用实例
+
+        Stage 6+ 补充：
         - 加载配置文件
-        - 创建 LLM 客户端
+        - 创建 Session
+        - ��建 LLM 客户端
         - 加载 Agent 规范
         - 初始化 MCP 工具
         - 创建 Soul 引擎
 
-        我们阶段 2 只保留最基础的：
-        - 验证工作目录
-        - 创建应用实例
+        Args:
+            work_dir: 工作目录
+            verbose: 是否开启详细输出
+
+        Returns:
+            MyCLI 实例
+
+        Raises:
+            FileNotFoundError: 工作目录不存在
         """
         # 验证工作目录是否存在
         if not work_dir.exists():
@@ -75,6 +113,54 @@ class MyCLI:
 
         return instance
 
+        # ============================================================
+        # TODO: Stage 6+ 完整实现（参考官方）
+        # ============================================================
+        # ��方参考：kimi-cli-fork/src/kimi_cli/app.py:26-121
+        #
+        # @staticmethod
+        # async def create(
+        #     work_dir: Path,
+        #     verbose: bool = False,
+        #     session: Session | None = None,  # Stage 6+
+        #     config_file: Path | None = None,  # Stage 6+
+        #     model_name: str | None = None,    # Stage 6+
+        #     yolo: bool = False,               # Stage 8+
+        #     thinking: bool = False,           # Stage 8+
+        #     mcp_configs: list[dict] | None = None,  # Stage 7+
+        #     agent_file: Path | None = None,   # Stage 7+
+        # ) -> "MyCLI":
+        #     """创建 MyCLI 实例（完整版）"""
+        #
+        #     # 1. 创建或恢复 Session
+        #     if session is None:
+        #         session = Session.create(work_dir) or Session.continue_(work_dir)
+        #
+        #     # 2. 加载配置文件
+        #     config = load_config(config_file)
+        #
+        #     # 3. 创建 Soul 引擎
+        #     soul = await create_soul(
+        #         work_dir=work_dir,
+        #         model_name=model_name,
+        #         config_file=config_file,
+        #         session=session,
+        #         yolo=yolo,
+        #         thinking=thinking,
+        #         mcp_configs=mcp_configs,
+        #     )
+        #
+        #     # 4. 创建应用实例
+        #     instance = MyCLI(
+        #         work_dir=work_dir,
+        #         verbose=verbose,
+        #         soul=soul,
+        #         session=session,
+        #     )
+        #
+        #     return instance
+        # ============================================================
+
     async def run_print_mode(
         self,
         command: str | None,
@@ -88,6 +174,20 @@ class MyCLI:
 
         对应源码：kimi-cli-main/src/kimi_cli/app.py:167
 
+        Stage 2-3 实现：
+        - 创建 PrintUI 实例（模拟模式）
+
+        Stage 4-5 实现：✅
+        - 创建 PrintUI 实例（真实 LLM）
+        - 通过 create_soul() 创建 Soul 引擎
+        - 调用 soul.run() 获取 LLM 响应
+
+        Stage 6+ 实现：
+        - 使用 PrintApp（官方实现）
+        - 集成 Wire 机制
+        - 支持 input_format (text/stream-json)
+        - 支持 output_format (text/stream-json)
+
         Args:
             command: 用户命令（如果为 None，则从标准输入读取）
         """
@@ -97,18 +197,37 @@ class MyCLI:
         if self.verbose:
             print("[应用层] 启动 Print UI 模式")
 
-        # 创建 PrintUI 实例
-        # Stage 4-5: 已实现配置文件系统 + kosong框架集成 ✅
-        # use_real_llm=True 表示使用真实 LLM
-        # 配置通过 .mycli_config.json 文件管理（支持环境变量覆盖）
+        # ============================================================
+        # Stage 4-5：直接使用真实 LLM ✅
+        # ============================================================
+        # 不再需要 use_real_llm 参数！
+        # 官方代码逻辑：
+        # - 有配置 → 调用真实 LLM
+        # - 无配置 → 抛出 LLMNotSet 异常
         ui = PrintUI(
             verbose=self.verbose,
             work_dir=self.work_dir,
-            use_real_llm=True,  # ✅ Stage 4-5: 启用真实 LLM
         )
 
         # 运行 UI
         await ui.run(command)
+
+        # ============================================================
+        # TODO: Stage 6+ 使用官方 PrintApp
+        # ============================================================
+        # 官方参考：kimi-cli-fork/src/kimi_cli/ui/print/__init__.py
+        #
+        # from kimi_cli.ui.print import PrintApp
+        #
+        # app = PrintApp(
+        #     soul=self.soul,
+        #     input_format="text",   # or "stream-json"
+        #     output_format="text",  # or "stream-json"
+        #     context_file=self.session.history_file,
+        # )
+        #
+        # await app.run(command)
+        # ============================================================
 
     async def run_shell_mode(
         self,
@@ -123,6 +242,10 @@ class MyCLI:
 
         对应源码：kimi-cli-main/src/kimi_cli/app.py:107
 
+        Stage 2-5：未实现
+        Stage 6：实现 Shell UI + Wire 机制
+        Stage 7：集成工具调用显示
+
         Args:
             command: 初始命令（可选）
         """
@@ -133,3 +256,19 @@ class MyCLI:
         # 阶段 6 再实现 Shell UI
         print("❌ Shell 模式将在阶段 6 实现")
         print("提示：当前请使用 `--ui print` 运行")
+
+        # ============================================================
+        # TODO: Stage 6 实现 Shell UI
+        # ============================================================
+        # 官方参考：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py
+        #
+        # from kimi_cli.ui.shell import ShellApp
+        #
+        # app = ShellApp(
+        #     soul=self.soul,
+        #     work_dir=self.work_dir,
+        #     verbose=self.verbose,
+        # )
+        #
+        # await app.run(command)
+        # ============================================================
