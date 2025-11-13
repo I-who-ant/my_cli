@@ -8,105 +8,243 @@
 
 ## 📋 学习路线概览
 
+老王我从官方493个commits中整理出真实的开发时间线：
+
 ```
-阶段1: 骨架搭建      (Sep 10, 10 commits)   → 可运行的最小框架
-阶段2: 核心功能      (Sep 11-12, 15 commits) → Shell工具、消息历史、-c参数
-阶段3: UI增强        (Sep 13-14, 20 commits) → 工具调用可视化、Session管理
-阶段4: 工具系统      (Sep 16-18, 30 commits) → Task/Read/Write/Glob/Grep工具
-阶段5: 稳定性提升    (Sep 22-25, 25 commits) → 重试机制、配置系统、日志
-阶段6: 架构重构      (Sep 26-Oct 5, 45 commits) → Context、工具抽象、MCP支持
-阶段7: 完善与发布    (Oct 9-24, 80+ commits) → Agent文件、Shell模式、Approval
-阶段8: 生态完善      (Oct 25-Nov 10, 250+ commits) → SDK、多Provider、Thinking模式
+阶段0: 项目初始化    (Sep 10, 1 commit)      → init项目
+阶段1: 最小骨架      (Sep 10, 4 commits)     → CLI+App+Soul骨架，可运行
+阶段2: 核心工具      (Sep 11-12, 14 commits)  → Shell工具、消息历史、工具可视化
+阶段3: UI与会话      (Sep 13-14, 17 commits)  → 优雅中断、AGENTS.md、Session管理
+阶段4: 文件工具      (Sep 15-18, 18 commits)  → Task/Read/Write/Glob/Grep工具
+阶段5: 稳定性        (Sep 22-25, 32 commits)  → 重试、日志、配置、Print模式
+阶段6: 工具重构      (Sep 26-Oct 1, 35 commits) → Context抽象、工具统一
+阶段7: MCP与编辑     (Oct 2-15, 50+ commits) → MCP协议、PatchFile、编辑工具
+阶段8: Shell模式     (Oct 16-25, 60+ commits) → Shell UI、多Provider
+阶段9: 高级功能      (Oct 26-Nov 12, 250+ commits) → Thinking、图片、ACP服务
+```
+
+**注意**：阶段划分基于功能演进，不是严格按日期！
+
+---
+
+## 🎯 阶段0：项目初始化（从零开始）
+
+**时间**：2025-09-10 15:24
+**Commits**：1个
+**目标**：创建项目基础结构
+
+### 关键 Commit
+
+```
+8b827e5 | 2025-09-10 | init
+```
+
+### 做了什么
+
+**文件创建**（6个文件，53行代码）：
+```
+.gitignore          # Git忽略规则（16行）
+.python-version     # Python版本（3.13）
+README.md           # 空README
+pyproject.toml      # 项目配置（30行）
+src/kimi/__init__.py # 空包文件
+src/kimi/cli.py     # 最简CLI入口（6行）
+```
+
+### 关键内容
+
+#### pyproject.toml（项目配置）
+```toml
+[project]
+name = "kimi-cli"
+version = "0.1.0"
+description = "Kimi CLI tool"
+requires-python = ">=3.12"
+
+[project.scripts]
+kimi = "kimi.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+```
+
+#### src/kimi/cli.py（最简入口）
+```python
+def main():
+    print("Hello, Kimi!")
+
+if __name__ == "__main__":
+    main()
+```
+
+### 学习要点
+
+1. **项目结构**：
+   - `src/` 布局（推荐，避免导入问题）
+   - `pyproject.toml` 现代Python项目配置
+   - `.python-version` 用于pyenv等工具
+
+2. **命令入口**：
+   - `[project.scripts]` 定义可执行命令
+   - `kimi = "kimi.cli:main"` → 命令名=模块:函数
+
+3. **Python版本要求**：`>=3.12`（使用新特性）
+
+### My CLI 对比
+
+| 内容 | Kimi CLI | My CLI | 状态 |
+|------|----------|--------|------|
+| 项目结构 | src/kimi/ | my_cli/ | ✅ 已完成 |
+| pyproject.toml | ✅ | ✅ | 已完成 |
+| 命令入口 | kimi | my_cli/mc | ✅ 已完成 |
+| Python版本 | >=3.12 | >=3.13 | ✅ 已完成 |
+
+### 如何测试
+
+```bash
+# 方法1：pip安装（可编辑模式）
+pip install -e .
+
+# 方法2：直接运行
+python src/kimi/cli.py
+
+# 结果：输出 "Hello, Kimi!"
 ```
 
 ---
 
-## 🎯 阶段1：骨架搭建（可运行的最小框架）
+## 🎯 阶段1：最小骨架（CLI+App+Soul框架）
 
-**时间**：2025-09-10
-**Commits**：10个
-**目标**：从零到一，搭建可运行的 CLI 框架
+**时间**：2025-09-10（init之后）
+**Commits**：4个
+**目标**：在init基础上实现可运行的三层架构骨架
 
 ### 关键 Commits（时间正序）
 
 ```
-8b827e5 | 2025-09-10 | init
 e997490 | 2025-09-10 | chore: update readme
-7798a2e | 2025-09-10 | feat: a runnable skeleton
+7798a2e | 2025-09-10 | feat: a runnable skeleton  ⭐核心！
 e06c4ae | 2025-09-10 | chore: rename `src/kimi` to `src/kimi_cli`
 5f6a743 | 2025-09-10 | feat: add shortcuts for cli options
 ```
 
 ### 学习重点
 
-#### 1.1 项目初始化（`8b827e5 init`）
+#### 1.1 可运行的骨架（`7798a2e feat: a runnable skeleton`）⭐
+
+这是**最关键的一步**！从打印"Hello, Kimi!"到一个可以和AI对话的完整框架！
 
 **做了什么**：
-- 创建基本目录结构
-- 配置 `pyproject.toml`
-- 添加 `.gitignore`
+- 实现 CLI 入口（使用 Click框架）
+- 实现 App 应用层（KimiCLI类）
+- 实现 Soul 引擎骨架（核心AI循环）
+- 实现 Print UI（最简单的输出模式）
+- 集成 LLM API（Moonshot kimi-k1-8k模型）
 
-**学习要点**：
+**关键文件结构**：
 ```
-kimi-cli/
-├── src/
-│   └── kimi/          # 初始命名
-├── pyproject.toml     # 项目配置
-├── README.md          # 项目说明
-└── .gitignore         # Git忽略规则
+src/kimi_cli/
+├── __init__.py
+├── cli.py          # CLI入口（Click）
+├── app.py          # KimiCLI应用层
+├── soul.py         # Soul核心引擎
+├── tools/
+│   └── shell.py    # Shell工具（初版）
+└── ui/
+    └── print/
+        └── ui_print.py   # Print UI模式
 ```
 
-**对应 my_cli**：
-- 已完成：✅ 基本目录结构
-- 已完成：✅ `pyproject.toml` 和 `setup.py`
-- 已完成：✅ README.md
-
----
-
-#### 1.2 可运行的骨架（`7798a2e feat: a runnable skeleton`）
-
-**做了什么**：
-- 实现 CLI 入口（使用 Click）
-- 实现 App 层
-- 实现最简单的 Print UI
-- 实现 Soul 引擎骨架
-
-**关键文件**：
+**代码示例（cli.py）**：
 ```python
-# cli.py - CLI入口
+import click
+import asyncio
+from pathlib import Path
+
 @click.command()
-@click.option("--verbose", is_flag=True)
-@click.option("--work-dir", "-w", type=click.Path(...))
-def kimi(verbose: bool, work_dir: Path):
+@click.option("--verbose", is_flag=True, help="Enable verbose mode")
+@click.option("--work-dir", "-w", type=click.Path(...), help="Working directory")
+def kimi(verbose: bool, work_dir: Path | None):
+    """Kimi CLI - AI-powered command line tool"""
     asyncio.run(async_main(verbose, work_dir))
 
-# app.py - 应用层
-class KimiCLI:
-    async def run_print_mode(self):
-        # 运行打印模式
-        pass
+async def async_main(verbose: bool, work_dir: Path | None):
+    from .app import KimiCLI
+    app = KimiCLI(work_dir=work_dir, verbose=verbose)
+    await app.run_print_mode()
 
-# soul.py - 灵魂引擎
+if __name__ == "__main__":
+    kimi()
+```
+
+**代码示例（app.py）**：
+```python
+from pathlib import Path
+from .soul import Soul
+from .ui.print.ui_print import PrintUI
+
+class KimiCLI:
+    def __init__(self, work_dir: Path | None, verbose: bool):
+        self.work_dir = work_dir or Path.cwd()
+        self.verbose = verbose
+        self.soul = Soul(work_dir=self.work_dir)
+
+    async def run_print_mode(self):
+        """运行打印模式"""
+        ui = PrintUI()
+        await self.soul.run(ui)
+```
+
+**代码示例（soul.py）**：
+```python
 class Soul:
-    async def run(self):
-        # 核心AI循环
-        pass
+    """核心AI引擎"""
+
+    def __init__(self, work_dir: Path):
+        self.work_dir = work_dir
+        self.llm_client = self._init_llm_client()
+
+    async def run(self, ui):
+        """主循环"""
+        while True:
+            # 1. 调用LLM
+            response = await self.llm_client.chat(...)
+
+            # 2. 显示响应
+            ui.display(response)
+
+            # 3. 执行工具调用
+            if response.tool_calls:
+                await self.execute_tools(response.tool_calls)
 ```
 
 **学习要点**：
-1. **三层架构**：CLI → App → Soul
-2. **异步编程**：全程使用 `async/await`
-3. **Click框架**：命令行参数解析
-4. **最小可运行**：能启动、能响应，但功能极简
+1. **三层架构**：
+   - CLI层（cli.py）：命令行参数解析
+   - App层（app.py）：应用逻辑协调
+   - Soul层（soul.py）：AI引擎核心
+
+2. **异步编程**：
+   - 全程使用 `async/await`
+   - `asyncio.run()` 启动异步主函数
+
+3. **Click框架**：
+   - `@click.command()` 定义命令
+   - `@click.option()` 定义选项
+
+4. **最小可运行**：
+   - 能启动、能和AI对话
+   - 但功能极简（只有最基础的Shell工具）
 
 **对应 my_cli**：
 - 已完成：✅ `cli.py` 入口
 - 已完成：✅ `app.py` 应用层
-- 待完成：❌ `soul.py` 核心引擎（当前只有占位符）
+- 待完善：⚠️ `soul.py` 核心引擎（当前只有占位符）
 
 ---
 
-#### 1.3 代码规范（`e06c4ae chore: rename src/kimi to src/kimi_cli`）
+#### 1.2 代码规范（`e06c4ae chore: rename src/kimi to src/kimi_cli`）
 
 **做了什么**：
 - 将 `src/kimi` 重命名为 `src/kimi_cli`
@@ -126,18 +264,17 @@ class Soul:
 
 ---
 
-#### 1.4 快捷选项（`5f6a743 feat: add shortcuts for cli options`）
+#### 1.3 快捷选项（`5f6a743 feat: add shortcuts for cli options`）
 
 **做了什么**：
 - 添加命令行选项的快捷键
   - `--work-dir` → `-w`
-  - `--command` → `-c`
+  - `--command` → `-c`（在阶段2添加）
   - `--verbose` → `-v`
 
 **代码示例**：
 ```python
 @click.option("--work-dir", "-w", type=click.Path(...))
-@click.option("--command", "-c", type=str)
 @click.option("--verbose", "-v", is_flag=True)
 ```
 

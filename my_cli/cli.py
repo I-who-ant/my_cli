@@ -78,6 +78,8 @@ def my_cli(
         $ python cli.py --verbose -c "Debug test"
     """
     # 使用 asyncio.run() 运行异步主函数
+    # asyncio.run() 会自动创建一个事件循环,并在函数执行完毕后关闭事件循环
+    #
     asyncio.run(async_main(verbose, work_dir, command, ui))
 
 

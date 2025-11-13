@@ -10,21 +10,37 @@
 
 ## 📋 学习阶段规划
 
+基于官方493个commits的真实开发历程，老王我整理出以下学习阶段：
+
 ### 已完成阶段
 
-- [x] **Stage 0**: 项目初始化
-- [x] **Stage 1**: 最简 CLI 入口
-- [x] **Stage 2**: 应用层框架
-- [x] **Stage 3**: Print UI 模式
+- [x] **Stage 0**: 项目初始化（init项目结构）
+- [x] **Stage 1**: 最小骨架（CLI+App+Soul框架）
+- [x] **Stage 2**: 应用层框架（已部分实现）
+- [x] **Stage 3**: Print UI 模式（已完成）
+
+### 当前阶段（急需实现）
+
+- [ ] **Stage 2 补充**: 核心工具（Shell/消息历史/工具可视化）
+  - ❌ Shell 工具实现
+  - ❌ 消息历史持久化
+  - ❌ 工具调用可视化
+  - ✅ `-c` 单命令模式
 
 ### 待学习阶段
 
-- [ ] **Stage 4**: Wire 协议层（Soul ↔ UI 通信）
-- [ ] **Stage 5**: Soul 核心引擎（LLM 调用）
-- [ ] **Stage 6**: Shell UI 模式（交互式终端）
-- [ ] **Stage 7**: 工具系统（Function Calling）
-- [ ] **Stage 8**: ACP 协议（远程 Agent）
-- [ ] **Stage 9**: Wire UI 模式（JSON-RPC 服务）
+- [ ] **Stage 3 补充**: UI与会话（优雅中断/AGENTS.md/Session）
+- [ ] **Stage 4**: 文件工具（Task/Read/Write/Glob/Grep）
+- [ ] **Stage 5**: 稳定性提升（重试/日志/配置/Print模式）
+- [ ] **Stage 6**: 工具重构（Context抽象/工具统一）
+- [ ] **Stage 7**: MCP与编辑（MCP协议/PatchFile）
+- [ ] **Stage 8**: Shell模式（Shell UI/多Provider）
+- [ ] **Stage 9**: 高级功能（Thinking/图片/ACP服务）
+
+**重要提示**：
+- 阶段划分基于功能演进，不是严格按日期！
+- 每个阶段都要**循序渐进**，不要跳步骤
+- 详细的学习路线参考：`docs/Kimi_CLI官方开发历程学习路线图.md`
 
 ## 🔖 Git 标签策略
 
@@ -34,20 +50,22 @@
 stage-{阶段号}-{简短描述}
 
 例如：
-- stage-1-cli-entry
-- stage-2-app-layer
-- stage-3-print-ui
-- stage-4-wire-protocol
+- stage-0-init              # 阶段0：项目初始化
+- stage-1-skeleton          # 阶段1：最小骨架
+- stage-2-core-tools        # 阶段2：核心工具
+- stage-3-ui-session        # 阶段3：UI与会话
+- stage-4-file-tools        # 阶段4：文件工具
 ```
 
 ### 创建标签
 
 ```bash
 # 为当前提交打标签
-git tag -a stage-1-cli-entry -m "阶段 1: 最简 CLI 入口完成"
+git tag -a stage-0-init -m "阶段 0: 项目初始化完成"
+git tag -a stage-1-skeleton -m "阶段 1: 最小骨架完成"
 
 # 推送标签到远程
-git push origin stage-1-cli-entry
+git push origin stage-1-skeleton
 
 # 或推送所有标签
 git push origin --tags
@@ -60,7 +78,7 @@ git push origin --tags
 git tag
 
 # 查看标签详情
-git show stage-1-cli-entry
+git show stage-1-skeleton
 
 # 在 GitHub 查看
 # https://github.com/I-who-ant/my_cli/tags
@@ -98,49 +116,60 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ## 🚀 完整工作流示例
 
-### 阶段 1-3（已完成）回顾
+### 阶段 0-1（已完成）回顾
 
 ```bash
 # 1. 创建初始提交（已完成）
 git add .
-git commit -m "🎉 init: My CLI 基础框架 - 阶段 1-3 完整实现"
+git commit -m "🎉 init: My CLI 项目初始化"
 git push
 
-# 2. 为阶段打标签
-git tag -a stage-1-3-foundation -m "阶段 1-3: CLI 入口、应用层、Print UI 完成"
-git push origin stage-1-3-foundation
+# 2. 实现最小骨架
+git add .
+git commit -m "✨ feat(stage1): 实现CLI+App+Soul最小骨架"
+git push
+
+# 3. 为阶段打标签
+git tag -a stage-0-init -m "阶段 0: 项目初始化完成"
+git tag -a stage-1-skeleton -m "阶段 1: 最小骨架完成"
+git push origin --tags
 ```
 
-### 阶段 4 学习流程（示例）
+### 阶段 2 学习流程（当前急需：核心工具）
+
+**重要**：阶段2是当前最急需完成的！包括Shell工具、消息历史、工具可视化。
 
 ```bash
 # ========================================
 # 第 1 步：阅读文档，理解需求
 # ========================================
-cat docs/stage-04-wire-protocol.md  # 假设有这个文档
+cat docs/Kimi_CLI官方开发历程学习路线图.md  # 查看阶段2详情
+
+# 查看官方Shell工具实现
+cd /home/seeback/PycharmProjects/Modelrecognize/kimi-cli-fork
+git show 2bdcd30  # feat: add shell tool
 
 # ========================================
 # 第 2 步：创建新分支（可选，但推荐）
 # ========================================
-git checkout -b feature/stage-4-wire-protocol
+cd /home/seeback/PycharmProjects/Modelrecognize/kimi-cli-main/imitate-src
+git checkout -b feature/stage-2-core-tools
 
 # ========================================
-# 第 3 步：实现 Wire 协议层
+# 第 3 步：实现核心工具
 # ========================================
 
-# 3.1 创建目录结构
-mkdir -p my_cli/wire
+# 3.1 实现Shell工具
+# 参考官方实现，创建/修改 my_cli/tools/shell.py
 
-# 3.2 创建文件
-touch my_cli/wire/__init__.py
-touch my_cli/wire/message.py
-touch my_cli/wire/queue.py
+# 3.2 实现消息历史持久化
+# 在 Soul 中添加历史保存逻辑
 
-# 3.3 实现代码（边写边测试）
-# ... 编写代码 ...
+# 3.3 实现工具调用可视化
+# 在 Print UI 中添加工具状态显示
 
 # 3.4 测试功能
-my_cli --verbose -c "测试 Wire 协议"
+my_cli --verbose -c "ls -la"
 
 # ========================================
 # 第 4 步：提交代码
@@ -151,47 +180,23 @@ git status
 git diff
 
 # 4.2 添加文件
-git add my_cli/wire/
+git add my_cli/tools/
+git add my_cli/soul.py
+git add my_cli/ui/
 
-# 4.3 提交（使用 emoji 风格）
-git commit -m "$(cat <<'EOF'
-✨ feat(stage4): 实现 Wire 协议层
-
-## 新增功能
-- Wire Message 数据结构
-- asyncio.Queue 消息队列
-- Soul ↔ UI 通信机制
-
-## 技术细节
-- WireMessage 类定义（message.py）
-- MessageQueue 实现（queue.py）
-- 支持双向异步通信
-
-## 测试
-- 手动测试通过
-- Wire 消息正常收发
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-Co-Authored-By: Claude <noreply@anthropic.com>
-EOF
-)"
+# 4.3 提交（使用 /zcf:git-commit 命令）
+/zcf:git-commit --scope stage2
 
 # ========================================
 # 第 5 步：打标签
 # ========================================
-git tag -a stage-4-wire-protocol -m "阶段 4: Wire 协议层完成"
+git tag -a stage-2-core-tools -m "阶段 2: 核心工具完成"
 
 # ========================================
 # 第 6 步：推送到远程
 # ========================================
-# 如果用了分支
-git push origin feature/stage-4-wire-protocol
-git push origin stage-4-wire-protocol
-
-# 如果直接在 main 分支
 git push origin main
-git push origin stage-4-wire-protocol
+git push origin stage-2-core-tools
 
 # ========================================
 # 第 7 步：在 GitHub 查看
@@ -199,7 +204,6 @@ git push origin stage-4-wire-protocol
 # 打开浏览器：
 # - 提交历史：https://github.com/I-who-ant/my_cli/commits/main
 # - 标签列表：https://github.com/I-who-ant/my_cli/tags
-# - 具体提交：点击 commit hash 查看详情
 ```
 
 ## 🏷️ 为已完成阶段补打标签
@@ -208,13 +212,16 @@ git push origin stage-4-wire-protocol
 # 查看当前提交历史
 git log --oneline
 
-# 为现有的提交打标签
-git tag -a stage-1-3-foundation -m "阶段 1-3: CLI 入口、应用层、Print UI 完成" e5c0887
+# 找到阶段0和阶段1的commit，为它们打标签
+# 假设最初的commit是 abc1234，骨架实现的commit是 def5678
+git tag -a stage-0-init -m "阶段 0: 项目初始化完成" abc1234
+git tag -a stage-1-skeleton -m "阶段 1: 最小骨架完成" def5678
 
 # 推送标签
-git push origin stage-1-3-foundation
+git push origin --tags
 
 # 在 GitHub 查看
+# https://github.com/I-who-ant/my_cli/tags
 # https://github.com/I-who-ant/my_cli/releases
 ```
 
@@ -306,28 +313,37 @@ git checkout main
 ### 对比两个阶段的差异
 
 ```bash
-# 对比阶段 3 和阶段 4 的差异
-git diff stage-1-3-foundation..stage-4-wire-protocol
+# 对比阶段 1 和阶段 2 的差异
+git diff stage-1-skeleton..stage-2-core-tools
 
 # 只看文件列表
-git diff --name-only stage-1-3-foundation..stage-4-wire-protocol
+git diff --name-only stage-1-skeleton..stage-2-core-tools
 
 # 查看统计信息
-git diff --stat stage-1-3-foundation..stage-4-wire-protocol
+git diff --stat stage-1-skeleton..stage-2-core-tools
 ```
 
 ## 📚 学习建议
 
 ### 每个阶段的流程
 
-1. **阅读文档**：`docs/stage-XX-*.md`
-2. **理解原理**：查看对应的 Kimi CLI 源码
-3. **实现代码**：边写边测试
-4. **本地测试**：`my_cli -c "测试"`
-5. **规范提交**：使用 emoji + conventional commits
-6. **打标签**：标记阶段完成
-7. **推送远程**：`git push origin main --tags`
-8. **GitHub 查看**：验证提交和标签
+1. **阅读路线图**：详细查看 `docs/Kimi_CLI官方开发历程学习路线图.md`
+2. **查看官方代码**：在 `kimi-cli-fork` 中查看对应的commits
+3. **理解原理**：搞清楚为什么要这么实现
+4. **实现代码**：在 `my_cli` 中实现类似功能
+5. **本地测试**：`my_cli -c "测试命令"`
+6. **规范提交**：使用 `/zcf:git-commit` 命令
+7. **打标签**：标记阶段完成
+8. **推送远程**：`git push origin main --tags`
+9. **GitHub 查看**：验证提交和标签
+
+### 重要原则
+
+1. **循序渐进**：不要跳步骤，一个阶段一个阶段来
+2. **参考官方**：多看官方commits，理解设计思路
+3. **边学边做**：理论和实践结合
+4. **及时记录**：遇到问题和心得及时记录
+5. **规范提交**：保持良好的git习惯
 
 ### Git 工作流建议
 
@@ -346,7 +362,7 @@ main 分支
 ```bash
 main 分支
   ↓
-feature/stage-4 分支
+feature/stage-2-core-tools 分支
   ↓
   实现功能
   ↓
@@ -354,7 +370,7 @@ feature/stage-4 分支
   ↓
   合并到 main
   ↓
-  打标签
+  打标签 stage-2-core-tools
   ↓
   推送
 ```
@@ -364,9 +380,11 @@ feature/stage-4 分支
 每完成一个阶段，确保：
 
 - [ ] 代码能正常运行（`my_cli -c "test"`）
-- [ ] 添加了相应的文档（`docs/stage-XX-*.md`）
-- [ ] 提交信息规范（emoji + type + scope）
-- [ ] 打了 Git 标签（`stage-XX-描述`）
+- [ ] 查看了官方对应的commits
+- [ ] 理解了实现原理
+- [ ] 添加了相应的注释和文档
+- [ ] 提交信息规范（使用 `/zcf:git-commit`）
+- [ ] 打了 Git 标签（`stage-X-description`）
 - [ ] 推送到远程（`git push origin main --tags`）
 - [ ] 在 GitHub 验证（查看 commits 和 tags）
 
@@ -392,17 +410,65 @@ git lg          # = 漂亮的日志
 
 ## 🎉 总结
 
-1. **学习流程**：阅读文档 → 实现代码 → 测试 → 提交 → 打标签 → 推送
-2. **提交规范**：emoji + conventional commits
-3. **标签管理**：每个阶段一个标签
+1. **学习流程**：阅读路线图 → 查看官方代码 → 理解原理 → 实现 → 测试 → 提交 → 打标签 → 推送
+2. **提交规范**：使用 `/zcf:git-commit` 命令（emoji + conventional commits）
+3. **标签管理**：每个阶段一个标签（stage-X-description）
 4. **GitHub 查看**：commits / tags / releases 页面
-5. **本地测试**：`pip install -e .` + `my_cli` 命令
+5. **本地测试**：`pip install -e .` + `my_cli` 命令（别名 `mc`）
 
 ---
 
 **现在开始你的学习之旅吧！** 🚀
 
-下一步：
-1. 运行 `pip install -e .` 安装 my_cli 命令
-2. 为阶段 1-3 补打标签
-3. 开始学习阶段 4
+## 📌 下一步行动
+
+### 当前状态
+- ✅ 阶段 0: 项目初始化完成
+- ✅ 阶段 1: 最小骨架完成
+- ⚠️ 阶段 2: 核心工具**急需实现**
+
+### 立即行动（阶段2核心工具）
+
+**第一步**：查看路线图详情
+```bash
+cat docs/Kimi_CLI官方开发历程学习路线图.md
+# 重点阅读"阶段2：核心功能"部分
+```
+
+**第二步**：查看官方Shell工具实现
+```bash
+cd /home/seeback/PycharmProjects/Modelrecognize/kimi-cli-fork
+git show 2bdcd30  # feat: add shell tool
+```
+
+**第三步**：在my_cli中实现Shell工具
+```bash
+cd /home/seeback/PycharmProjects/Modelrecognize/kimi-cli-main/imitate-src
+# 修改/创建 my_cli/tools/shell.py
+# 参考官方实现，使用 asyncio.create_subprocess_shell
+```
+
+**第四步**：测试和提交
+```bash
+# 测试
+my_cli -c "ls -la"
+
+# 提交
+/zcf:git-commit --scope stage2
+
+# 打标签
+git tag -a stage-2-core-tools -m "阶段 2: 核心工具完成"
+
+# 推送
+git push origin main --tags
+```
+
+---
+
+**重要提示**：
+- 不要着急，一步一步来！
+- Shell工具是最核心的功能，必须先实现它！
+- 遇到问题多看官方代码，理解设计思路
+- 保持良好的git提交习惯
+
+**老王的建议**：Shell工具实现了，你的my_cli就真正能干活了！其他都是锦上添花！🚀
