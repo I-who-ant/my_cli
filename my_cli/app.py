@@ -98,7 +98,14 @@ class MyCLI:
             print("[应用层] 启动 Print UI 模式")
 
         # 创建 PrintUI 实例
-        ui = PrintUI(verbose=self.verbose)
+        # Stage 4-5: 已实现配置文件系统 + kosong框架集成 ✅
+        # use_real_llm=True 表示使用真实 LLM
+        # 配置通过 .mycli_config.json 文件管理（支持环境变量覆盖）
+        ui = PrintUI(
+            verbose=self.verbose,
+            work_dir=self.work_dir,
+            use_real_llm=True,  # ✅ Stage 4-5: 启用真实 LLM
+        )
 
         # 运行 UI
         await ui.run(command)
