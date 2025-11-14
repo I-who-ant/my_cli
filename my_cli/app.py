@@ -192,7 +192,7 @@ class MyCLI:
             command: 用户命令（如果为 None，则从标准输入读取）
         """
         # 导入 UI 模块（延迟导入，避免循环依赖）
-        from my_cli.ui.print.ui_print import PrintUI
+        from my_cli.ui.print import PrintUI
 
         if self.verbose:
             print("[应用层] 启动 Print UI 模式")
