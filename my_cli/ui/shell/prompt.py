@@ -24,13 +24,15 @@ Shell UI Prompt 模块（输入处理）⭐ Stage 12 增强版
 
 from __future__ import annotations
 
+import os
+import re
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.completion import Completer, Completion, merge_completers
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory, InMemoryHistory
@@ -149,6 +151,215 @@ class MetaCommandCompleter(Completer):
                 )
 
 
+class FileMentionCompleter(Completer):
+    """
+    文件路径自动补全器 ⭐ Stage 14
+
+    功能：
+    1. 当输入包含 '@' 时触发补全
+    2. 匹配工作目录下的文件和目录
+    3. 忽略常见的缓存目录（.git, node_modules, __pycache__ 等）
+
+    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:96-342
+
+    使用示例：
+        输入: @my_cli<Tab>
+        补全: @my_cli/
+        描述: 目录
+
+    简化版实现（Stage 14）：
+    - ✅ @ 触发补全
+    - ✅ 忽略常见缓存目录
+    - ✅ 目录添加 / 后缀
+    - ❌ 缓存机制（Stage 15+）
+    - ❌ 模糊匹配（Stage 15+）
+    - ❌ 路径排序优化（Stage 15+）
+
+    TODO (Stage 15+):
+    - 添加文件索引缓存（2 秒刷新间隔）
+    - 集成 FuzzyCompleter 模糊匹配
+    - 路径排序优化（basename 优先）
+    - 深度路径索引（os.walk）
+    """
+
+    # 忽略的目录列表（简化版）
+    _IGNORED_DIRS = {
+        ".git",
+        ".hg",
+        ".svn",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".venv",
+        "venv",
+        ".idea",
+        ".vscode",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+    }
+
+    def __init__(self, root: Path):
+        """
+        初始化文件补全器
+
+        Args:
+            root: 工作目录根路径
+        """
+        self._root = root
+
+    @staticmethod
+    def _extract_fragment(text: str) -> str | None:
+        """
+        提取 @ 后的文件路径片段
+
+        Args:
+            text: 输入文本
+
+        Returns:
+            路径片段，如果没有 @ 或格式不正确则返回 None
+
+        示例：
+            "hello @my_cli" -> "my_cli"
+            "@docs/README" -> "docs/README"
+            "no at sign" -> None
+        """
+        index = text.rfind("@")
+        if index == -1:
+            return None
+
+        # 确保 @ 前面不是字母或数字（避免匹配 email）
+        if index > 0:
+            prev = text[index - 1]
+            if prev.isalnum():
+                return None
+
+        # 提取 @ 后的片段
+        fragment = text[index + 1 :]
+        if not fragment:
+            return ""
+
+        # 如果包含空格，不补全
+        if any(ch.isspace() for ch in fragment):
+            return None
+
+        return fragment
+
+    def _is_ignored(self, name: str) -> bool:
+        """
+        判断文件/目录是否应该被忽略
+
+        Args:
+            name: 文件/目录名称
+
+        Returns:
+            True 如果应该忽略
+        """
+        return name in self._IGNORED_DIRS
+
+    def _get_matching_paths(self, fragment: str) -> list[tuple[str, bool]]:
+        """
+        获取匹配的文件路径
+
+        Args:
+            fragment: 路径片段
+
+        Returns:
+            (路径, 是否为目录) 的列表
+
+        简化版实现：
+        - 只搜索根目录和一级子目录
+        - 忽略常见缓存目录
+        - 最多返回 50 个结果
+        """
+        matches: list[tuple[str, bool]] = []
+
+        try:
+            # 如果片段包含 /，分解为目录和文件名
+            if "/" in fragment:
+                parts = fragment.split("/")
+                search_dir = self._root / "/".join(parts[:-1])
+                prefix = parts[-1].lower()
+            else:
+                search_dir = self._root
+                prefix = fragment.lower()
+
+            # 如果目录不存在，返回空
+            if not search_dir.exists() or not search_dir.is_dir():
+                return matches
+
+            # 遍历目录
+            for entry in sorted(search_dir.iterdir(), key=lambda p: p.name):
+                name = entry.name
+
+                # 跳过隐藏文件（以 . 开头）
+                if name.startswith(".") and prefix and not prefix.startswith("."):
+                    continue
+
+                # 跳过忽略目录
+                if self._is_ignored(name):
+                    continue
+
+                # 检查是否匹配前缀
+                if not name.lower().startswith(prefix):
+                    continue
+
+                # 计算相对路径
+                rel_path = entry.relative_to(self._root).as_posix()
+                is_dir = entry.is_dir()
+
+                matches.append((rel_path, is_dir))
+
+                # 限制返回数量
+                if len(matches) >= 50:
+                    break
+
+        except OSError:
+            # 忽略权限错误等
+            pass
+
+        return matches
+
+    @override
+    def get_completions(
+        self, document: Document, complete_event: CompleteEvent
+    ) -> iter[Completion]:
+        """
+        获取补全建议
+
+        Args:
+            document: 当前文档
+            complete_event: 补全事件
+
+        Yields:
+            Completion 对象
+        """
+        # 提取 @ 后的片段
+        fragment = self._extract_fragment(document.text_before_cursor)
+        if fragment is None:
+            return
+
+        # 获取匹配的路径
+        matches = self._get_matching_paths(fragment)
+
+        # 生成补全建议
+        for path, is_dir in matches:
+            # 目录添加 / 后缀
+            display = f"{path}/" if is_dir else path
+
+            # 计算替换位置（从 @ 之后开始）
+            at_index = document.text_before_cursor.rfind("@")
+            start_position = -(len(document.text_before_cursor) - at_index - 1)
+
+            yield Completion(
+                text=display,  # 补全文本
+                start_position=start_position,  # 替换位置
+                display=display,  # 显示文本
+                display_meta="目录" if is_dir else "文件",  # 描述
+            )
+
+
 # ============================================================
 # 输入封装 ⭐ Stage 12
 # ============================================================
@@ -220,11 +431,16 @@ class CustomPromptSession:
             self.history = InMemoryHistory()
 
         # ============================================================
-        # Stage 12：创建自动补全器 ⭐
+        # Stage 14：创建自动补全器（命令 + 文件）⭐
         # ============================================================
         if enable_completer:
-            # 斜杠命令补全
-            self.completer = MetaCommandCompleter()
+            # 合并多个补全器
+            self.completer = merge_completers(
+                [
+                    MetaCommandCompleter(),  # 斜杠命令补全
+                    FileMentionCompleter(self.work_dir),  # ⭐ Stage 14: 文件路径补全
+                ]
+            )
         else:
             self.completer = None
 
