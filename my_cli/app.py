@@ -233,32 +233,54 @@ class MyCLI:
         self,
         command: str | None,
     ) -> None:
-        """运行 Shell UI 模式.
+        """运行 Shell UI 模式 ⭐ Stage 9 实现.
 
         Shell 模式是交互式 UI：
-        - 使用 Rich 库渲染漂亮的终端输出
-        - 支持键盘快捷键
-        - 实时显示 LLM 响应
+        - 多轮对话（复用同一个 Soul 实例）
+        - Context 自动保持
+        - 优雅退出处理（Ctrl+C, Ctrl+D, exit）
+        - 实时流式输出
 
         对应源码：kimi-cli-main/src/kimi_cli/app.py:107
 
-        Stage 2-5：未实现
-        Stage 6：实现 Shell UI + Wire 机制
-        Stage 7：集成工具调用显示
+        阶段演进：
+        - Stage 2-5：未实现
+        - Stage 9：实现 Shell UI（简化版）✅
+          * 交互式输入循环
+          * 多轮对话支持
+          * Context 持久化
+          * 工具调用显示
+
+        Stage 10+ 优化：
+        - 使用 prompt_toolkit（命令历史、自动补全）
+        - 使用 rich 库美化输出
+        - 支持斜杠命令（/help, /clear, /setup）
+        - 后台任务管理（自动更新检查）
 
         Args:
-            command: 初始命令（可选）
+            command: 初始命令（可选，如果提供则执行单命令模式）
         """
-        if self.verbose:
-            print("[应用层] Shell UI 模式暂未实现")
-            print("[应用层] 请使用 Print 模式：--ui print")
+        # 导入 UI 模块（延迟导入，避免循环依赖）
+        from my_cli.ui.shell import ShellUI
 
-        # 阶段 6 再实现 Shell UI
-        print("❌ Shell 模式将在阶段 6 实现")
-        print("提示：当前请使用 `--ui print` 运行")
+        if self.verbose:
+            print("[应用层] 启动 Shell UI 模式 (Stage 9)")
 
         # ============================================================
-        # TODO: Stage 6 实现 Shell UI
+        # Stage 9：Shell UI 简化实现 ✅
+        # ============================================================
+        ui = ShellUI(
+            verbose=self.verbose,
+            work_dir=self.work_dir,
+        )
+
+        # 运行 UI（支持两种模式）
+        # - command 不为 None：单命令模式（执行一次后退出）
+        # - command 为 None：交互循环模式（多轮对话）
+        await ui.run(command)
+
+        # ============================================================
+        # TODO: Stage 10+ 使用官方 ShellApp
         # ============================================================
         # 官方参考：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py
         #
@@ -266,9 +288,15 @@ class MyCLI:
         #
         # app = ShellApp(
         #     soul=self.soul,
-        #     work_dir=self.work_dir,
-        #     verbose=self.verbose,
+        #     welcome_info=[...],  # 欢迎信息
         # )
         #
         # await app.run(command)
+        #
+        # 优化点：
+        # - prompt_toolkit 的 PromptSession（命令历史、补全）
+        # - rich 库的 Panel 和 Table（漂亮的 UI）
+        # - 斜杠命令支持（/help, /clear, /setup, /thinking）
+        # - 信号处理（install_sigint_handler）
+        # - 后台任务管理（自动更新检查）
         # ============================================================
