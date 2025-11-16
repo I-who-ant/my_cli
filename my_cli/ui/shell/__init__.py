@@ -1,63 +1,70 @@
 """
-Stage 9：Shell 交互模式 - 多轮对话 CLI
+Stage 11：Shell UI 模块化重构
 
 学习目标：
-1. 理解交互式 UI 的实现
-2. 理解如何复用 Soul 实例实现多轮对话
-3. 理解输入循环和退出信号处理
-4. 理解 KeyboardInterrupt 和 EOFError 的区别
+1. 理解官方的模块化架构设计
+2. 单一职责原则（SRP）在实践中的应用
+3. 模块间的依赖和协作关系
+4. 如何设计可扩展的命令系统
 
 对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py
 
-核心特性：
+模块架构（Stage 11）：
+- ✅ console.py    - Console 单例 + 主题配置
+- ✅ metacmd.py    - 斜杠命令系统（装饰器注册）
+- ✅ prompt.py     - CustomPromptSession（输入处理）
+- ✅ visualize.py  - UI Loop 渲染逻辑
+- ✅ __init__.py   - ShellApp 主入口（协调器）
+
+核心特性（保留 Stage 9/10 功能）：
 - 多轮对话（复用同一个 Soul 实例）
-- Context 自动保持（无需手动管理）
-- 优雅退出（Ctrl+C 取消当前请求，Ctrl+D/exit 退出）
-- 实时流式输出（复用 Print UI 的 _ui_loop）
+- Context 自动保持
+- 优雅退出处理
+- prompt_toolkit 命令历史
+- rich 彩色输出
+- 斜杠命令支持
 
 使用示例：
-    python cli.py shell
+    python cli.py --ui shell
 """
 
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
 
 from kosong.chat_provider import ChatProviderError
-from kosong.message import ContentPart, TextPart, ToolCall
-from kosong.tooling import ToolResult, ToolError, ToolOk
+from rich.panel import Panel
 
 from my_cli.soul import LLMNotSet, RunCancelled, create_soul, run_soul
-from my_cli.wire import WireUISide
-from my_cli.wire.message import StepBegin, StepInterrupted
+from my_cli.ui.shell.console import console
+from my_cli.ui.shell.metacmd import get_meta_command
+from my_cli.ui.shell.prompt import CustomPromptSession, UserInput
+from my_cli.ui.shell.visualize import visualize
 
-__all__ = ["ShellUI"]
+__all__ = ["ShellApp"]
 
 
-class ShellUI:
+class ShellApp:
     """
-    Shell UI - 交互式多轮对话模式
+    Shell App - 模块化的交互式 UI（Stage 11 重构版）
 
-    这是一个交互式 UI 实现，支持多轮对话：
-    - 进入输入循环（while True）
-    - 复用同一个 Soul 实例（Context 自动保持）
-    - 处理退出信号（Ctrl+C, Ctrl+D, exit 命令）
-    - 复用 Print UI 的流式输出逻辑
+    这是官方架构的简化版实现：
+    - 使用模块化设计（console、metacmd、prompt、visualize）
+    - 符合单一职责原则（SRP）
+    - 易于扩展和维护
 
-    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:23-230
+    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:29-92
 
-    阶段演进：
-    - Stage 9：Shell 交互模式 ✅
-      * 多轮对话支持
-      * Context 自动保持
-      * 优雅退出处理
+    架构演进：
+    - Stage 9：Shell 交互模式（基础版）✅
+    - Stage 10：UI 美化和增强（enhanced.py.md.backup）✅
+    - Stage 11：模块化重构（按官方架构分层）✅
     """
 
     def __init__(self, verbose: bool = False, work_dir: Path | None = None):
         """
-        初始化 Shell UI
+        初始化 ShellApp
 
         Args:
             verbose: 是否显示详细日志
@@ -65,308 +72,252 @@ class ShellUI:
         """
         self.verbose = verbose
         self.work_dir = work_dir or Path.cwd()
+        self.soul = None  # Soul 实例（在 run() 中创建）
 
-    async def run(self, command: str | None = None) -> None:
+    async def run(self, command: str | None = None) -> bool:
         """
-        运行 Shell UI（支持两种模式）
+        运行 Shell App
 
-        模式 1：单命令模式（command 不为 None）
-            - 执行一次命令后退出
-            - 与 Print UI 行为相同
-
-        模式 2：交互循环模式（command 为 None）⭐ Stage 9 核心
-            - 进入 while True 输入循环
-            - 复用同一个 Soul 实例（Context 保持）
-            - 支持多轮对话
-            - 优雅处理退出信号
+        支持两种模式：
+        1. 单命令模式（command 不为 None）：执行一次后退出
+        2. 交互模式（command 为 None）：进入输入循环
 
         Args:
-            command: 用户输入（None 则进入交互模式）
+            command: 用户命令（None 则进入交互模式）
+
+        Returns:
+            是否成功执行
         """
         # 1. 创建 Soul（只创建一次，复用于所有对话）⭐
         try:
-            soul = create_soul(work_dir=self.work_dir)
+            self.soul = create_soul(work_dir=self.work_dir)
         except FileNotFoundError as e:
-            print(f"\n❌ 配置文件错误: {e}\n")
-            print("请先运行 'mycli init' 创建配置文件")
-            return
+            console.print(f"\n[red]❌ 配置文件错误: {e}[/red]\n")
+            console.print("请先运行 'mycli init' 创建配置文件")
+            return False
         except ValueError as e:
-            print(f"\n❌ 配置错误: {e}\n")
-            return
+            console.print(f"\n[red]❌ 配置错误: {e}[/red]\n")
+            return False
 
         if self.verbose:
-            print(f"\n🤖 使用模型: {soul.model_name}\n")
+            console.print(f"\n[cyan]🤖 使用模型: {self.soul.model_name}[/cyan]\n")
 
         # ============================================================
         # 模式 1：单命令模式
         # ============================================================
         if command is not None:
-            await self._run_single_command(soul, command)
-            return
+            return await self._run_single_command(command)
 
         # ============================================================
-        # 模式 2：交互循环模式 ⭐ Stage 9 核心
+        # 模式 2：交互循环模式 ⭐ Stage 11 模块化版
         # ============================================================
-        self._print_welcome(soul.name, soul.model_name)
 
-        # 进入输入循环
-        while True:
-            try:
-                # 2. 获取用户输入
-                user_input = await self._get_user_input()
+        # 2. 显示欢迎信息
+        _print_welcome_info(self.soul.name, self.soul.model_name)
 
-                # 3. 跳过空输入（提前检查）⭐
-                if not user_input or not user_input.strip():
+        # 3. 创建 CustomPromptSession（模块化）
+        with CustomPromptSession(work_dir=self.work_dir) as prompt_session:
+            # 4. 进入输入循环
+            while True:
+                try:
+                    # 获取用户输入（使用模块化的 prompt.py）
+                    user_input: UserInput = await prompt_session.prompt()
+
+                    # 跳过空输入
+                    if not user_input.command:
+                        continue
+
+                    # 处理退出命令
+                    if user_input.command.lower() in ["exit", "quit", "/exit", "/quit"]:
+                        console.print("[yellow]👋 再见！[/yellow]")
+                        break
+
+                    # Stage 11：斜杠命令处理 ⭐
+                    if user_input.command.startswith("/"):
+                        await self._run_meta_command(user_input.command[1:])
+                        continue
+
+                    # 普通命令：发送到 LLM
+                    await self._run_soul_command(user_input.content)
+
+                except KeyboardInterrupt:
+                    # Ctrl+C：取消当前请求，继续循环
+                    console.print("\n\n[grey50]⚠️  提示: 输入 'exit' 或按 Ctrl+D 退出[/grey50]\n")
                     continue
 
-                # 4. 处理退出命令
-                if user_input.strip().lower() in ["exit", "quit", "q"]:
-                    print("\n👋 再见！\n")
+                except EOFError:
+                    # Ctrl+D：优雅退出
+                    console.print("\n\n[yellow]👋 再见！[/yellow]\n")
                     break
 
-                # 5. 运行 Soul（复用同一个实例）⭐
-                await self._run_soul_command(soul, user_input)
+                except Exception as e:
+                    # 其他错误：打印错误但继续循环
+                    console.print(f"\n[red]❌ 未知错误: {e}[/red]\n")
+                    if self.verbose:
+                        import traceback
 
-            except KeyboardInterrupt:
-                # Ctrl+C：取消当前请求，继续循环 ⭐
-                print("\n\n⚠️  提示: 输入 'exit' 或按 Ctrl+D 退出\n")
-                continue
+                        traceback.print_exc()
+                    continue
 
-            except EOFError:
-                # Ctrl+D：优雅退出 ⭐
-                print("\n\n👋 再见！\n")
-                break
+        return True
 
-            except UnicodeDecodeError as e:
-                # 编码错误：友好提示
-                print(f"\n❌ 编码错误: {e}\n")
-                print("提示：请确保终端使用 UTF-8 编码")
-                print("检查命令：echo $LANG（应该包含 UTF-8）\n")
-                if self.verbose:
-                    import traceback
-                    traceback.print_exc()
-                continue
-
-            except Exception as e:
-                # 其他错误：打印错误但继续循环
-                print(f"\n❌ 未知错误: {e}\n")
-                if self.verbose:
-                    import traceback
-                    traceback.print_exc()
-                continue
-
-    async def _get_user_input(self) -> str:
-        """
-        获取用户输入（异步包装）
-
-        Stage 9 简化版：使用 asyncio.to_thread 包装同步的 input()
-        官方使用 prompt_toolkit 的 PromptSession（支持历史记录、自动补全等）
-
-        TODO: Stage 10+ 优化：使用 prompt_toolkit
-        - 官方实现：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:CustomPromptSession
-        - 优化点：
-          * 命令历史记录（上下箭头）
-          * 自动补全（Tab 键）
-          * 多行输入支持
-          * 自定义提示符样式
-
-        Returns:
-            用户输入的字符串
-        """
-        # 使用 asyncio.to_thread 让同步的 input() 不阻塞事件循环
-        return await asyncio.to_thread(input, "You: ")
-
-    async def _run_single_command(self, soul, command: str) -> None:
-        """
-        单命令模式：执行一次命令后退出
-
-        这个模式与 Print UI 行为相同
-
-        Args:
-            soul: Soul 实例
-            command: 用户命令
-        """
+    async def _run_single_command(self, command: str) -> bool:
+        """单命令模式：执行一次命令后退出"""
         if self.verbose:
-            print(f"📝 用户输入: {command}\n")
+            console.print(f"[grey50]📝 用户输入: {command}[/grey50]\n")
 
-        print("\n💬 AI 回复:\n")
+        console.print("\n[bold cyan]💬 AI 回复:[/bold cyan]\n")
         try:
-            await self._run_soul_command(soul, command)
-            print("\n")
+            await self._run_soul_command(command)
+            console.print("\n")
 
             if self.verbose:
-                print(f"\n✅ 对话轮次: {soul.message_count}")
+                console.print(f"\n[green]✅ 对话轮次: {self.soul.message_count}[/green]")
+
+            return True
 
         except Exception as e:
-            print(f"\n❌ 错误: {e}\n")
-            raise
+            console.print(f"\n[red]❌ 错误: {e}[/red]\n")
+            return False
 
-    async def _run_soul_command(self, soul, user_input: str) -> None:
+    async def _run_meta_command(self, command_name: str) -> None:
+        """
+        运行斜杠命令 ⭐ Stage 11 模块化版
+
+        使用 metacmd.py 的命令注册表查询和执行命令
+
+        Args:
+            command_name: 命令名称（不包含 / 前缀）
+        """
+        # 解析命令名和参数
+        parts = command_name.strip().split()
+        cmd_name = parts[0] if parts else ""
+        cmd_args = parts[1:] if len(parts) > 1 else []
+
+        # 从注册表查询命令
+        cmd = get_meta_command(cmd_name)
+
+        if cmd is None:
+            console.print(f"[red]❌ 未知命令: /{cmd_name}[/red]")
+            console.print("[grey50]输入 /help 查看可用命令[/grey50]")
+            return
+
+        # 执行命令
+        try:
+            result = cmd.func(self, cmd_args)
+            # 支持同步和异步命令
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:
+            console.print(f"[red]❌ 命令执行失败: {e}[/red]")
+            if self.verbose:
+                import traceback
+
+                traceback.print_exc()
+
+    async def _run_soul_command(self, user_input: str) -> None:
         """
         运行 Soul 命令（核心执行逻辑）
 
         流程：
         1. 创建取消事件（用于 Ctrl+C）
         2. 调用 run_soul() 连接 Soul 和 UI Loop
-        3. UI Loop 接收 Wire 消息并实时显示
-        4. 处理各种异常（LLMNotSet, ChatProviderError 等）
+        3. UI Loop（visualize.py）接收 Wire 消息并渲染
 
         Args:
-            soul: Soul 实例
             user_input: 用户输入
         """
-        # 1. 创建取消事件
         cancel_event = asyncio.Event()
 
-        # 2. 调用 run_soul()
         try:
             await run_soul(
-                soul=soul,
+                soul=self.soul,
                 user_input=user_input,
-                ui_loop_fn=self._ui_loop,  # 复用 _ui_loop
+                ui_loop_fn=visualize,  # 使用模块化的 visualize.py ⭐
                 cancel_event=cancel_event,
             )
 
         except LLMNotSet:
-            print("\n❌ LLM 未设置（需要配置 API Key）\n")
+            console.print("\n[red]❌ LLM 未设置（需要配置 API Key）[/red]\n")
         except ChatProviderError as e:
-            print(f"\n❌ LLM API 错误: {e}\n")
+            console.print(f"\n[red]❌ LLM API 错误: {e}[/red]\n")
         except RunCancelled:
             # Ctrl+C 取消运行（不打印错误，已在外层处理）
             pass
         except Exception as e:
-            print(f"\n❌ 未知错误: {e}\n")
-            raise
+            console.print(f"\n[red]❌ 未知错误: {e}[/red]\n")
+            if self.verbose:
+                import traceback
 
-    async def _ui_loop(self, wire_ui: WireUISide) -> None:
-        """
-        UI Loop 函数 - 从 Wire 接收消息并打印
+                traceback.print_exc()
 
-        复用 Print UI 的 _ui_loop 逻辑（完全相同）
 
-        流程：
-        1. 循环接收 Wire 消息
-        2. 根据消息类型渲染输出：
-           - TextPart: 打印文本（逐字输出）
-           - StepBegin: 显示步骤编号
-           - ToolCall: 显示工具调用信息
-           - ToolResult: 显示工具执行结果
-           - StepInterrupted: 退出循环
+def _print_welcome_info(name: str, model: str) -> None:
+    """
+    打印欢迎信息 ⭐ Stage 11 rich 美化版
 
-        Args:
-            wire_ui: Wire 的 UI 侧接口
-        """
-        import json
+    使用 rich Panel 边框和颜色
+    """
+    welcome_text = f"""[bold cyan]欢迎使用 {name}![/bold cyan]
 
-        while True:
-            msg = await wire_ui.receive()
+[grey50]模型:[/grey50] [yellow]{model}[/yellow]
+[grey50]输入 [/grey50][cyan]/help[/cyan][grey50] 查看可用命令[/grey50]
+[grey50]输入 [/grey50][cyan]exit[/cyan][grey50] 或按 [/grey50][cyan]Ctrl+D[/cyan][grey50] 退出[/grey50]
+[grey50]按 [/grey50][cyan]Ctrl+C[/cyan][grey50] 可以取消当前请求[/grey50]
+"""
 
-            # 文本片段：实时打印
-            if isinstance(msg, TextPart):
-                if msg.text:
-                    print(msg.text, end="", flush=True)
-
-            elif isinstance(msg, ContentPart):
-                if hasattr(msg, "text") and msg.text:
-                    print(msg.text, end="", flush=True)
-
-            # 步骤开始：显示步骤编号
-            elif isinstance(msg, StepBegin):
-                if msg.n > 1:
-                    print(f"\n\n🔄 [Step {msg.n}]", flush=True)
-
-            # 工具调用：显示工具名称和参数
-            elif isinstance(msg, ToolCall):
-                print(f"\n\n🔧 调用工具: {msg.function.name}", flush=True)
-                try:
-                    arguments = json.loads(msg.function.arguments) if msg.function.arguments else {}
-                    args_str = json.dumps(arguments, ensure_ascii=False, indent=2)
-                    print(f"   参数:\n{args_str}", flush=True)
-                except Exception:
-                    print(f"   参数: {msg.function.arguments}", flush=True)
-
-            # 工具结果：显示成功/失败状态
-            elif isinstance(msg, ToolResult):
-                if isinstance(msg.result, ToolOk):
-                    print(f"\n✅ 工具成功", flush=True)
-                    if msg.result.brief:
-                        print(f"   {msg.result.brief}", flush=True)
-                    output = str(msg.result.output)
-                    if len(output) > 500:
-                        output = output[:500] + "...(截断)"
-                    if output.strip():
-                        print(f"   输出: {output}", flush=True)
-                elif isinstance(msg.result, ToolError):
-                    print(f"\n❌ 工具失败: {msg.result.brief}", flush=True)
-                    if msg.result.message:
-                        print(f"   错误: {msg.result.message}", flush=True)
-
-            # 步骤中断：退出 UI Loop
-            elif isinstance(msg, StepInterrupted):
-                break
-
-    def _print_welcome(self, name: str, model: str) -> None:
-        """
-        打印欢迎信息
-
-        Stage 9 简化版：纯文本欢迎信息
-        官方使用 rich 库的 Panel 和 Table（漂亮的 UI）
-
-        TODO: Stage 10+ 优化：使用 rich 库
-        - 官方实现：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:_print_welcome_info()
-        - 优化点：
-          * 使用 Panel 边框
-          * 显示 KIMI logo
-          * 显示版本更新信息
-          * 颜色和样式美化
-
-        Args:
-            name: Agent 名称
-            model: 模型名称
-        """
-        print("\n" + "=" * 60)
-        print(f"  欢迎使用 {name}!")
-        print(f"  模型: {model}")
-        print("  输入 'exit' 或按 Ctrl+D 退出")
-        print("  按 Ctrl+C 可以取消当前请求")
-        print("=" * 60 + "\n")
+    console.print(
+        Panel(
+            welcome_text,
+            border_style="cyan",
+            padding=(1, 2),
+            expand=False,
+        )
+    )
+    console.print()  # 空行
 
 
 # ============================================================
-# TODO: Stage 10+ 扩展（参考官方）
+# TODO: Stage 12+ 更多功能（参考官方）
 # ============================================================
-# 官方参考：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py
+# 官方参考：kimi-cli-fork/src/kimi_cli/ui/shell/
 #
-# Stage 10+ 需要添加的功能：
+# Stage 12+ 需要添加的模块和功能：
 #
-# 1. 使用 prompt_toolkit 的 PromptSession：
-#    - 命令历史记录（上下箭头）
-#    - 自动补全（Tab 键）
-#    - 多行输入支持（Shift+Enter）
-#    - 自定义提示符样式
+# 1. keyboard.py（键盘事件监听）：
+#    - 跨平台键盘监听（Unix/Windows）
+#    - 异步事件流
+#    - 热键支持
 #
-# 2. 使用 rich 库美化输出：
-#    - Panel 边框
-#    - 颜色和样式
-#    - KIMI logo
-#    - 版本更新提示
+# 2. debug.py（调试功能）：
+#    - 调试模式切换
+#    - Wire 消息日志
+#    - 性能分析
 #
-# 3. 支持特殊命令（斜杠命令）：
-#    - /help: 显示帮助信息
-#    - /clear: 清空 Context
-#    - /setup: 配置 LLM
-#    - /thinking: 启用思考模式
+# 3. replay.py（历史回放）：
+#    - 重放最近的对话
+#    - 会话恢复
 #
-# 4. 支持更多错误类型：
-#    - MaxStepsReached: 达到最大步数
-#    - LLMNotSupported: 模型不支持某些功能
-#    - APIStatusError: API 状态错误（401, 402, 403 等）
+# 4. setup.py（配置向导）：
+#    - 交互式配置 LLM
+#    - API Key 管理
+#    - 模型选择
 #
-# 5. 支持后台任务：
-#    - 自动更新检查
-#    - 异步任务管理
+# 5. update.py（自动更新）：
+#    - 检查更新
+#    - 版本提示
+#    - 后台任务
 #
-# 6. 支持信号处理：
-#    - install_sigint_handler(): 自定义 SIGINT 处理
-#    - 取消事件传递到 Soul
+# 6. prompt.py 增强：
+#    - FileMentionCompleter（@文件路径补全）
+#    - MetaCommandCompleter（/命令补全）
+#    - 多模式切换（Normal/Shell/Thinking）
+#    - 状态栏显示
+#    - 剪贴板集成
+#
+# 7. metacmd.py 增强：
+#    - @meta_command 装饰器（简化注册）
+#    - 命令参数解析
+#    - Kimi Soul 专属命令
+#    - 帮助系统自动生成
 # ============================================================

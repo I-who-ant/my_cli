@@ -233,7 +233,7 @@ class MyCLI:
         self,
         command: str | None,
     ) -> None:
-        """运行 Shell UI 模式 ⭐ Stage 9 实现.
+        """运行 Shell UI 模式 ⭐ Stage 11 模块化架构.
 
         Shell 模式是交互式 UI：
         - 多轮对话（复用同一个 Soul 实例）
@@ -241,62 +241,75 @@ class MyCLI:
         - 优雅退出处理（Ctrl+C, Ctrl+D, exit）
         - 实时流式输出
 
-        对应源码：kimi-cli-main/src/kimi_cli/app.py:107
+        Stage 11 模块化重构：
+        - ✅ console.py    - Console 单例 + 主题配置
+        - ✅ metacmd.py    - 斜杠命令系统（装饰器注册）
+        - ✅ prompt.py     - CustomPromptSession（输入处理）
+        - ✅ visualize.py  - UI Loop 渲染逻辑
+        - ✅ __init__.py   - ShellApp 主入口（协调器）
+
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py
 
         阶段演进：
-        - Stage 2-5：未实现
-        - Stage 9：实现 Shell UI（简化版）✅
-          * 交互式输入循环
-          * 多轮对话支持
-          * Context 持久化
-          * 工具调用显示
-
-        Stage 10+ 优化：
-        - 使用 prompt_toolkit（命令历史、自动补全）
-        - 使用 rich 库美化输出
-        - 支持斜杠命令（/help, /clear, /setup）
-        - 后台任务管理（自动更新检查）
+        - Stage 9：Shell 交互模式（基础版）✅
+        - Stage 10：UI 美化和增强（enhanced.py.md.backup）✅
+        - Stage 11：模块化重构（按官方架构分层）✅
 
         Args:
             command: 初始命令（可选，如果提供则执行单命令模式）
         """
         # 导入 UI 模块（延迟导入，避免循环依赖）
-        from my_cli.ui.shell import ShellUI
+        # Stage 11：使用模块化 ShellApp ⭐
+        try:
+            from my_cli.ui.shell import ShellApp
 
-        if self.verbose:
-            print("[应用层] 启动 Shell UI 模式 (Stage 9)")
+            app = ShellApp(
+                verbose=self.verbose,
+                work_dir=self.work_dir,
+            )
+            if self.verbose:
+                print("[应用层] 启动 Modular ShellApp (Stage 11)")
+
+            # 运行 ShellApp
+            await app.run(command)
+
+        except ImportError as e:
+            # 如果模块化架构导入失败，回退到 Stage 10 增强版
+            if self.verbose:
+                print(f"[应用层] 模块化架构导入失败: {e}")
+                print("[应用层] 回退到 Enhanced Shell UI (Stage 10)")
+
+            try:
+                from my_cli.ui.shell.enhanced import EnhancedShellUI
+
+                ui = EnhancedShellUI(
+                    verbose=self.verbose,
+                    work_dir=self.work_dir,
+                )
+                await ui.run(command)
+            except ImportError:
+                # 最终回退到基础版 ShellUI
+                if self.verbose:
+                    print("[应用层] 回退到 Basic Shell UI (Stage 9)")
+                # 此处已无法回退，因为 __init__.py 已被重写
+                raise
 
         # ============================================================
-        # Stage 9：Shell UI 简化实现 ✅
+        # Stage 11 完成！✅ 已实现官方模块化架构
         # ============================================================
-        ui = ShellUI(
-            verbose=self.verbose,
-            work_dir=self.work_dir,
-        )
-
-        # 运行 UI（支持两种模式）
-        # - command 不为 None：单命令模式（执行一次后退出）
-        # - command 为 None：交互循环模式（多轮对话）
-        await ui.run(command)
-
-        # ============================================================
-        # TODO: Stage 10+ 使用官方 ShellApp
-        # ============================================================
-        # 官方参考：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py
+        # 当前实现：
+        # - console.py: Console 单例 + 主题配置
+        # - metacmd.py: 斜杠命令系统（装饰器注册）
+        # - prompt.py: CustomPromptSession（命令历史）
+        # - visualize.py: UI Loop 渲染逻辑
+        # - __init__.py: ShellApp 主入口
         #
-        # from kimi_cli.ui.shell import ShellApp
-        #
-        # app = ShellApp(
-        #     soul=self.soul,
-        #     welcome_info=[...],  # 欢迎信息
-        # )
-        #
-        # await app.run(command)
-        #
-        # 优化点：
-        # - prompt_toolkit 的 PromptSession（命令历史、补全）
-        # - rich 库的 Panel 和 Table（漂亮的 UI）
-        # - 斜杠命令支持（/help, /clear, /setup, /thinking）
-        # - 信号处理（install_sigint_handler）
-        # - 后台任务管理（自动更新检查）
+        # TODO Stage 12+：
+        # - keyboard.py: 键盘事件监听
+        # - debug.py: 调试功能
+        # - replay.py: 历史回放
+        # - setup.py: 配置向导
+        # - update.py: 自动更新
+        # - prompt.py 增强：自动补全、状态栏
+        # - metacmd.py 增强：@meta_command 装饰器
         # ============================================================

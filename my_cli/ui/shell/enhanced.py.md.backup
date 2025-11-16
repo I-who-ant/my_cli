@@ -1,0 +1,365 @@
+"""
+Stage 10：Shell UI 美化和增强
+
+学习目标：
+1. 集成 prompt_toolkit（命令历史记录）
+2. 集成 rich（Panel、颜色美化）
+3. 实现斜杠命令支持（/help, /clear）
+4. 优化用户体验
+
+对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/
+
+核心特性（Stage 10）：
+- ✅ prompt_toolkit PromptSession（命令历史）
+- ✅ rich Panel 边框（漂亮的欢迎信息）
+- ✅ 斜杠命令（/help, /clear, /exit）
+- ✅ 彩色输出（success/error/info）
+
+使用示例：
+    python -m my_cli --ui shell
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+
+from kosong.chat_provider import ChatProviderError
+from kosong.message import ContentPart, TextPart, ToolCall
+from kosong.tooling import ToolError, ToolOk, ToolResult
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import InMemoryHistory
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+
+from my_cli.soul import LLMNotSet, RunCancelled, create_soul, run_soul
+from my_cli.wire import WireUISide
+from my_cli.wire.message import StepBegin, StepInterrupted
+
+__all__ = ["EnhancedShellUI"]
+
+# Rich Console（全局单例）
+console = Console()
+
+
+class EnhancedShellUI:
+    """
+    Enhanced Shell UI - 增强版交互式 UI（Stage 10）
+
+    新增特性：
+    - ✅ prompt_toolkit PromptSession（命令历史、上下箭头）
+    - ✅ rich Panel 边框（漂亮的欢迎信息）
+    - ✅ 斜杠命令支持（/help, /clear, /exit）
+    - ✅ 彩色输出（成功/错误/信息）
+
+    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py
+    """
+
+    def __init__(self, verbose: bool = False, work_dir: Path | None = None):
+        """
+        初始化 Enhanced Shell UI
+
+        Args:
+            verbose: 是否显示详细日志
+            work_dir: 工作目录（默认当前目录）
+        """
+        self.verbose = verbose
+        self.work_dir = work_dir or Path.cwd()
+        # Stage 10：命令历史记录 ⭐
+        self.history = InMemoryHistory()
+
+    async def run(self, command: str | None = None) -> None:
+        """
+        运行 Enhanced Shell UI
+
+        Stage 10 增强：
+        - 使用 prompt_toolkit PromptSession
+        - 使用 rich Console 美化输出
+        - 支持斜杠命令
+        """
+        # 1. 创建 Soul
+        try:
+            soul = create_soul(work_dir=self.work_dir)
+        except FileNotFoundError as e:
+            console.print(f"\n[red]❌ 配置文件错误: {e}[/red]\n")
+            console.print("请先运行 'mycli init' 创建配置文件")
+            return
+        except ValueError as e:
+            console.print(f"\n[red]❌ 配置错误: {e}[/red]\n")
+            return
+
+        if self.verbose:
+            console.print(f"\n[cyan]🤖 使用模型: {soul.model_name}[/cyan]\n")
+
+        # 单命令模式
+        if command is not None:
+            await self._run_single_command(soul, command)
+            return
+
+        # ============================================================
+        # Stage 10：交互循环模式（增强版）⭐
+        # ============================================================
+
+        # 2. 显示欢迎信息（rich Panel）⭐
+        self._print_welcome(soul.name, soul.model_name)
+
+        # 3. 创建 PromptSession（支持命令历史）⭐
+        session: PromptSession = PromptSession(history=self.history)
+
+        # 4. 交互循环
+        while True:
+            try:
+                # 使用 prompt_toolkit 获取输入 ⭐
+                user_input = await session.prompt_async("✨ You: ")
+
+                # 处理空输入
+                if not user_input.strip():
+                    continue
+
+                # ============================================================
+                # Stage 10：斜杠命令支持 ⭐
+                # ============================================================
+                if user_input.startswith("/"):
+                    should_exit = await self._handle_slash_command(user_input, soul)
+                    if should_exit:
+                        break
+                    continue
+
+                # 处理退出命令
+                if user_input.lower() in ["exit", "quit", "q"]:
+                    console.print("\n[yellow]👋 再见！[/yellow]\n")
+                    break
+
+                # 运行 Soul
+                await self._run_soul_command(soul, user_input)
+
+            except KeyboardInterrupt:
+                # Ctrl+C：取消当前请求，继续循环
+                console.print("\n\n[grey50]⚠️  提示: 输入 'exit' 或按 Ctrl+D 退出[/grey50]\n")
+                continue
+
+            except EOFError:
+                # Ctrl+D：优雅退出
+                console.print("\n\n[yellow]👋 再见！[/yellow]\n")
+                break
+
+            except Exception as e:
+                # 其他错误：打印错误但继续循环
+                console.print(f"\n[red]❌ 未知错误: {e}[/red]\n")
+                if self.verbose:
+                    import traceback
+                    traceback.print_exc()
+                continue
+
+    async def _handle_slash_command(self, command: str, soul) -> bool:
+        """
+        处理斜杠命令 ⭐ Stage 10 新增
+
+        支持的命令：
+        - /help: 显示帮助信息
+        - /clear: 清空 Context
+        - /exit: 退出程序
+
+        Args:
+            command: 斜杠命令（如 "/help"）
+            soul: Soul 实例
+
+        Returns:
+            是否应该退出程序
+        """
+        cmd = command.lower().strip()
+
+        if cmd in ["/help", "/h", "/?"]:
+            # 显示帮助信息
+            help_text = """
+[bold cyan]📚 可用命令：[/bold cyan]
+
+[bold]基础命令：[/bold]
+  exit, quit         退出程序
+  Ctrl+D             退出程序
+  Ctrl+C             取消当前请求
+
+[bold]斜杠命令：[/bold]
+  /help, /h, /?      显示此帮助信息
+  /clear, /c         清空对话历史（Context）
+  /exit, /quit       退出程序
+
+[bold]功能：[/bold]
+  - 多轮对话（自动保持 Context）
+  - 工具调用（Bash、ReadFile、WriteFile）
+  - 命令历史（上下箭头查看历史输入）
+  - 流式输出（实时显示 LLM 响应）
+
+[grey50]提示：直接输入问题即可开始对话[/grey50]
+"""
+            console.print(Panel(help_text, border_style="cyan", padding=(1, 2)))
+            return False
+
+        elif cmd in ["/clear", "/c"]:
+            # 清空 Context
+            # TODO: 实现 Context.clear() 方法
+            console.print("[yellow]⚠️  /clear 命令暂未实现（需要 Context.clear() 方法）[/yellow]")
+            console.print("[grey50]提示：重启程序可清空历史[/grey50]")
+            return False
+
+        elif cmd in ["/exit", "/quit"]:
+            # 退出程序
+            console.print("\n[yellow]👋 再见！[/yellow]\n")
+            return True
+
+        else:
+            # 未知命令
+            console.print(f"[red]❌ 未知命令: {command}[/red]")
+            console.print("[grey50]输入 /help 查看可用命令[/grey50]")
+            return False
+
+    async def _run_single_command(self, soul, command: str) -> None:
+        """单命令模式：执行一次命令后退出"""
+        if self.verbose:
+            console.print(f"[grey50]📝 用户输入: {command}[/grey50]\n")
+
+        console.print("\n[bold cyan]💬 AI 回复:[/bold cyan]\n")
+        try:
+            await self._run_soul_command(soul, command)
+            console.print("\n")
+
+            if self.verbose:
+                console.print(f"\n[green]✅ 对话轮次: {soul.message_count}[/green]")
+
+        except Exception as e:
+            console.print(f"\n[red]❌ 错误: {e}[/red]\n")
+            raise
+
+    async def _run_soul_command(self, soul, user_input: str) -> None:
+        """运行 Soul 命令（核心执行逻辑）"""
+        cancel_event = asyncio.Event()
+
+        try:
+            await run_soul(
+                soul=soul,
+                user_input=user_input,
+                ui_loop_fn=self._ui_loop,
+                cancel_event=cancel_event,
+            )
+
+        except LLMNotSet:
+            console.print("\n[red]❌ LLM 未设置（需要配置 API Key）[/red]\n")
+        except ChatProviderError as e:
+            console.print(f"\n[red]❌ LLM API 错误: {e}[/red]\n")
+        except RunCancelled:
+            pass
+        except Exception as e:
+            console.print(f"\n[red]❌ 未知错误: {e}[/red]\n")
+            raise
+
+    async def _ui_loop(self, wire_ui: WireUISide) -> None:
+        """
+        UI Loop 函数 - 从 Wire 接收消息并打印
+
+        Stage 10 增强：使用 rich console 输出彩色信息
+        """
+        while True:
+            msg = await wire_ui.receive()
+
+            # 文本片段：实时打印
+            if isinstance(msg, TextPart):
+                if msg.text:
+                    console.print(msg.text, end="", markup=False)
+
+            elif isinstance(msg, ContentPart):
+                if hasattr(msg, "text") and msg.text:
+                    console.print(msg.text, end="", markup=False)
+
+            # 步骤开始：显示步骤编号
+            elif isinstance(msg, StepBegin):
+                if msg.n > 1:
+                    console.print(f"\n\n[cyan]🔄 [Step {msg.n}][/cyan]")
+
+            # 工具调用：显示工具名称和参数
+            elif isinstance(msg, ToolCall):
+                console.print(f"\n\n[yellow]🔧 调用工具: {msg.function.name}[/yellow]")
+                try:
+                    arguments = json.loads(msg.function.arguments) if msg.function.arguments else {}
+                    args_str = json.dumps(arguments, ensure_ascii=False, indent=2)
+                    console.print(f"[grey50]   参数:\n{args_str}[/grey50]")
+                except Exception:
+                    console.print(f"[grey50]   参数: {msg.function.arguments}[/grey50]")
+
+            # 工具结果：显示成功/失败状态
+            elif isinstance(msg, ToolResult):
+                if isinstance(msg.result, ToolOk):
+                    console.print(f"\n[green]✅ 工具成功[/green]")
+                    if msg.result.brief:
+                        console.print(f"[grey50]   {msg.result.brief}[/grey50]")
+                    output = str(msg.result.output)
+                    if len(output) > 500:
+                        output = output[:500] + "...(截断)"
+                    if output.strip():
+                        console.print(f"[grey50]   输出: {output}[/grey50]")
+                elif isinstance(msg.result, ToolError):
+                    console.print(f"\n[red]❌ 工具失败: {msg.result.brief}[/red]")
+                    if msg.result.message:
+                        console.print(f"[grey50]   错误: {msg.result.message}[/grey50]")
+
+            # 步骤中断：退出 UI Loop
+            elif isinstance(msg, StepInterrupted):
+                break
+
+    def _print_welcome(self, name: str, model: str) -> None:
+        """
+        打印欢迎信息 ⭐ Stage 10 rich 美化版
+
+        使用 rich Panel 边框和颜色
+        """
+        # 构造欢迎文本
+        welcome_text = f"""[bold cyan]欢迎使用 {name}![/bold cyan]
+
+[grey50]模型:[/grey50] [yellow]{model}[/yellow]
+[grey50]输入 [/grey50][cyan]/help[/cyan][grey50] 查看可用命令[/grey50]
+[grey50]输入 [/grey50][cyan]exit[/cyan][grey50] 或按 [/grey50][cyan]Ctrl+D[/cyan][grey50] 退出[/grey50]
+[grey50]按 [/grey50][cyan]Ctrl+C[/cyan][grey50] 可以取消当前请求[/grey50]
+"""
+
+        # 使用 rich Panel 显示
+        console.print(Panel(
+            welcome_text,
+            border_style="cyan",
+            padding=(1, 2),
+            expand=False,
+        ))
+        console.print()  # 空行
+
+
+# ============================================================
+# TODO: Stage 11+ 更多增强（参考官方）
+# ============================================================
+# 官方参考：kimi-cli-fork/src/kimi_cli/ui/shell/
+#
+# Stage 11+ 需要添加的功能：
+#
+# 1. CustomPromptSession（完整版）：
+#    - 自动补全（Tab 键）
+#    - 多行输入（Shift+Enter）
+#    - 自定义键绑定
+#    - 状态栏显示
+#
+# 2. 更多斜杠命令：
+#    - /setup: 配置 LLM
+#    - /thinking: 启用思考模式
+#    - /yolo: YOLO 模式（自动批准工具）
+#    - /shell: 执行 Shell 命令
+#
+# 3. Logo 显示：
+#    - ASCII art logo
+#    - 版本更新提示
+#
+# 4. 信号处理增强：
+#    - install_sigint_handler()
+#    - 取消事件传递
+#
+# 5. 后台任务：
+#    - 自动更新检查
+#    - 异步任务管理
+# ============================================================
