@@ -1,11 +1,12 @@
 """
-Shell UI 可视化渲染模块
+Shell UI 可视化渲染模块 ⭐ Stage 12 修复版
 
 职责：
 1. 处理 Wire 消息并渲染到终端
 2. 工具调用显示
 3. 流式文本输出
 4. 步骤指示器
+5. ⭐ 使用 patch_stdout 隔离输出（修复光标混乱 bug）
 
 对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/visualize.py
 
@@ -19,6 +20,10 @@ Stage 11 实现：
 - 基础版 UI Loop 渲染
 - 彩色输出（使用 rich）
 - 工具调用显示
+
+Stage 12 修复：
+- ⭐ 使用 patch_stdout 隔离输出
+- ⭐ 修复光标混乱 bug（输出不会和输入缓冲区混在一起）
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ import json
 
 from kosong.message import ContentPart, TextPart, ToolCall
 from kosong.tooling import ToolError, ToolOk, ToolResult
+from prompt_toolkit.patch_stdout import patch_stdout
 
 from my_cli.ui.shell.console import console
 from my_cli.wire import WireUISide
@@ -38,45 +44,57 @@ __all__ = ["visualize"]
 
 async def visualize(wire_ui: WireUISide) -> None:
     """
-    UI Loop 函数 - 从 Wire 接收消息并渲染
+    UI Loop 函数 - 从 Wire 接收消息并渲染 ⭐ Stage 12 修复版
 
     这是核心的渲染函数，负责：
     1. 循环接收 Wire 消息
     2. 根据消息类型渲染到终端
     3. 支持流式输出（逐字显示）
     4. 显示工具调用和结果
+    5. ⭐ 使用 patch_stdout 隔离输出，避免和 PromptSession 冲突
 
     Args:
         wire_ui: Wire 的 UI 侧接口
+
+    关键修复：
+        使用 patch_stdout 上下文管理器包裹所有输出操作，
+        确保 LLM 的输出不会和用户的输入缓冲区混在一起。
+
+        原理：
+        - patch_stdout 会将 stdout 重定向到 PromptSession 的输出区域
+        - PromptSession 的输入区域和输出区域是分离的
+        - 这样光标就不会出现在 LLM 的输出中
     """
-    while True:
-        msg = await wire_ui.receive()
+    # ⭐ 使用 patch_stdout 隔离输出
+    with patch_stdout():
+        while True:
+            msg = await wire_ui.receive()
 
-        # 文本片段：实时打印
-        if isinstance(msg, TextPart):
-            if msg.text:
-                console.print(msg.text, end="", markup=False)
+            # 文本片段：实时打印
+            if isinstance(msg, TextPart):
+                if msg.text:
+                    console.print(msg.text, end="", markup=False)
 
-        elif isinstance(msg, ContentPart):
-            if hasattr(msg, "text") and msg.text:
-                console.print(msg.text, end="", markup=False)
+            elif isinstance(msg, ContentPart):
+                if hasattr(msg, "text") and msg.text:
+                    console.print(msg.text, end="", markup=False)
 
-        # 步骤开始：显示步骤编号
-        elif isinstance(msg, StepBegin):
-            if msg.n > 1:
-                console.print(f"\n\n[cyan]🔄 [Step {msg.n}][/cyan]")
+            # 步骤开始：显示步骤编号
+            elif isinstance(msg, StepBegin):
+                if msg.n > 1:
+                    console.print(f"\n\n[cyan]🔄 [Step {msg.n}][/cyan]")
 
-        # 工具调用：显示工具名称和参数
-        elif isinstance(msg, ToolCall):
-            _render_tool_call(msg)
+            # 工具调用：显示工具名称和参数
+            elif isinstance(msg, ToolCall):
+                _render_tool_call(msg)
 
-        # 工具结果：显示成功/失败状态
-        elif isinstance(msg, ToolResult):
-            _render_tool_result(msg)
+            # 工具结果：显示成功/失败状态
+            elif isinstance(msg, ToolResult):
+                _render_tool_result(msg)
 
-        # 步骤中断：退出 UI Loop
-        elif isinstance(msg, StepInterrupted):
-            break
+            # 步骤中断：退出 UI Loop
+            elif isinstance(msg, StepInterrupted):
+                break
 
 
 def _render_tool_call(tool_call: ToolCall) -> None:
