@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, override
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, merge_completers
 from prompt_toolkit.document import Document
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
@@ -474,11 +475,14 @@ class CustomPromptSession:
             event.app.invalidate()
 
         # ============================================================
-        # Stage 13：创建 PromptSession（集成状态栏）⭐
+        # Stage 14：创建 PromptSession（集成补全优化）⭐
         # ============================================================
         self.session = PromptSession(
             history=self.history,
             completer=self.completer,  # ⭐ 自动补全
+            complete_while_typing=Condition(
+                lambda: self._mode == PromptMode.AGENT
+            ),  # ⭐ Stage 14: 只在 AGENT 模式下自动补全
             key_bindings=kb,  # ⭐ 自定义键绑定（多行 + 模式切换）
             multiline=False,  # 默认单行（Ctrl+J 换行）
             enable_history_search=True,  # 启用历史搜索
