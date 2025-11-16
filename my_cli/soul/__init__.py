@@ -1,13 +1,15 @@
 """
-阶段 4-5：Soul 模块 - Protocol 定义 + 便捷工厂函数
+阶段 4-8：Soul 模块 - Protocol 定义 + Wire 机制集成 + 工具调用
 
 学习目标：
 1. 理解 Protocol（接口）的设计思想
 2. 理解为什么要分离接口和实现
 3. 使用工厂函数简化创建流程
 4. 使用配置文件管理多个 API Provider ⭐
+5. 理解 Wire 机制和 run_soul() 架构 ⭐
+6. 理解工具系统集成 ⭐ Stage 8
 
-对应源码：kimi-cli-main/src/kimi_cli/soul/__init__.py
+对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py
 
 阶段演进：
 - Stage 4-5：基础 Soul 引擎 ✅
@@ -16,38 +18,127 @@
   * Agent/Runtime/Context 基础组件
   * kosong.generate() 调用 LLM
 
-- Stage 6：Wire 机制 + 流式输出（待实现）
-  * 新增 wire_send() 全局函数
-  * 修改 KimiSoul.run() 使用 on_message_part 回调
-  * run_soul() 函数：连接 Soul 和 UI Loop
-  * 新增 Wire 类（消息队列）
+- Stage 6：Wire 机制 + 流式输出 ✅
+  * 新增 wire_send() 全局函数 ✅
+  * 修改 KimiSoul.run() 使用 on_message_part 回调 ✅
+  * run_soul() 函数：连接 Soul 和 UI Loop ✅
+  * 新增异常类（LLMNotSet, RunCancelled 等）✅
 
-- Stage 7：工具系统（待实现）
-  * Agent 集成 Toolset
-  * 切换到 kosong.step() 支持工具调用
-  * 实现 Shell/ReadFile/WriteFile 工具
+- Stage 7：工具系统基础 ✅
+  * 实现 Bash/ReadFile/WriteFile 工具
+  * 实现 SimpleToolset 管理器
+  * 实现 utils.py（ToolResultBuilder 等）
 
-- Stage 8+：高级特性（待实现）
+- Stage 8：工具调用集成 ✅ ⭐
+  * 切换到 kosong.step() API
+  * KimiSoul 集成 Toolset
+  * 实现 Agent 循环（多轮工具调用）
+  * create_soul() 传入 Toolset
+
+- Stage 9+：高级特性（待实现）
   * Context 压缩（Compaction）
   * Checkpoint/Rollback 机制
   * 重试机制（tenacity）
   * Approval 系统
 """
 
+from __future__ import annotations
+
+import asyncio
+import contextlib
+from collections.abc import Callable, Coroutine
+from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from kosong.chat_provider.kimi import Kimi
+from kosong.message import ContentPart
 
 from my_cli.config import get_provider_and_model, load_config
 from my_cli.soul.agent import Agent
 from my_cli.soul.kimisoul import KimiSoul
 from my_cli.soul.runtime import Runtime
+from my_cli.wire import Wire, WireMessage, WireUISide
+
+if TYPE_CHECKING:
+    pass
 
 __all__ = [
+    # 核心接口和工厂
     "Soul",
     "create_soul",
+    # 异常类（UI 层需要捕获）
+    "LLMNotSet",
+    "RunCancelled",
+    # Wire 机制相关
+    "run_soul",
+    "wire_send",
+    "get_wire_or_none",
+    # 类型和数据类
+    "StatusSnapshot",
+    "UILoopFn",
 ]
+
+# ============================================================
+# Stage 6：异常类定义 ✅
+# ============================================================
+
+
+class LLMNotSet(Exception):
+    """
+    LLM 未设置异常
+
+    当尝试调用 LLM 但未配置 API Key 时抛出。
+
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:19-22
+    """
+
+    pass
+
+
+class RunCancelled(Exception):
+    """
+    运行取消异常
+
+    当用户取消运行（Ctrl+C）时抛出。
+
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:97-99
+    """
+
+    pass
+
+
+# ============================================================
+# Stage 6：数据类定义 ✅
+# ============================================================
+
+
+@dataclass(frozen=True, slots=True)
+class StatusSnapshot:
+    """
+    状态快照 - 记录 Soul 的运行状态
+
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:48-51
+    """
+
+    context_usage: float
+    """Context 使用率（百分比，0.0-1.0）"""
+
+
+# ============================================================
+# Stage 6：类型定义 ✅
+# ============================================================
+
+type UILoopFn = Callable[[WireUISide], Coroutine[Any, Any, None]]
+"""
+UI Loop 函数类型
+
+这是一个长时间运行的异步函数，用于可视化 Agent 行为。
+接收 WireUISide 参数，从 Wire 接收消息并渲染到 UI。
+
+对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:93-94
+"""
 
 
 @runtime_checkable
@@ -106,7 +197,12 @@ def create_soul(
     - 创建 Agent/Runtime/KimiSoul
     - 使用 kosong.generate() 调用 LLM
 
-    Stage 6+ 补充：
+    Stage 8 实现：⭐
+    - 创建 SimpleToolset 并注册工具
+    - KimiSoul 集成 Toolset
+    - 使用 kosong.step() 支持工具调用
+
+    Stage 9+ 补充：
     - 传入 MCP 配置（mcp_configs）
     - 传入 Session（会话管理）
     - 创建 Context 并恢复历史
@@ -124,7 +220,7 @@ def create_soul(
     Raises:
         ValueError: 如果配置文件无效或模型不存在
 
-    对应源码：kimi-cli-main/src/kimi_cli/app.py:26-121
+    对应源码：kimi-cli-fork/src/kimi_cli/app.py:26-121
     """
     # ============================================================
     # Stage 4-5：基础实现 ✅
@@ -144,7 +240,7 @@ def create_soul(
 
     # 4. 创建 ChatProvider
     # Stage 4-5: 只支持 Kimi Provider
-    # Stage 6+: 根据 provider.type 选择不同的 ChatProvider
+    # Stage 9+: 根据 provider.type 选择不同的 ChatProvider
     chat_provider = Kimi(
         base_url=provider.base_url,
         api_key=provider.api_key.get_secret_value(),
@@ -157,10 +253,20 @@ def create_soul(
         max_steps=20,
     )
 
-    # 6. 创建 KimiSoul
+    # ============================================================
+    # Stage 8：工具系统集成 ⭐
+    # ============================================================
+
+    # 6. 创建 SimpleToolset
+    from my_cli.tools.toolset import SimpleToolset
+
+    toolset = SimpleToolset()  # ⭐ SimpleToolset 自动注册 Bash/ReadFile/WriteFile
+
+    # 7. 创建 KimiSoul（传入 toolset）⭐
     soul = KimiSoul(
         agent=agent,
         runtime=runtime,
+        toolset=toolset,  # ⭐ Stage 8：传入工具集
     )
 
     return soul
@@ -235,3 +341,177 @@ def create_soul(
     #
     #     return soul
     # ============================================================
+
+
+# ============================================================
+# Stage 6：Wire 机制核心函数 ✅
+# ============================================================
+
+# ContextVar: 线程安全的全局变量（用于异步环境）
+_current_wire = ContextVar[Wire | None]("current_wire", default=None)
+"""
+当前 Wire 的 ContextVar
+
+ContextVar 是 Python 3.7+ 提供的线程安全的上下文变量：
+- 每个异步任务有独立的上下文副本
+- 不会在并发任务间互相干扰
+- 非常适合在 asyncio 环境中传递"全局"状态
+
+对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:164
+"""
+
+
+def get_wire_or_none() -> Wire | None:
+    """
+    获取当前 Wire（如果存在）
+
+    Returns:
+        Wire | None: 当前 Wire，如果不在 Soul 运行中则返回 None
+
+    使用场景：
+    - 在 Agent 循环中获取 Wire 并发送消息
+
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:167-172
+    """
+    return _current_wire.get()
+
+
+def wire_send(msg: WireMessage) -> None:
+    """
+    发送消息到当前 Wire
+
+    这是 Soul 层的"print"和"input"函数！
+    Soul 应该始终使用这个函数发送 Wire 消息。
+
+    Args:
+        msg: 要发送的消息（Event 类型）
+
+    Raises:
+        AssertionError: 如果 Wire 未设置（应该在 Soul 运行时才调用）
+
+    使用示例：
+        # 发送文本片段（流式输出）
+        wire_send(ContentPart(text="你好"))
+
+        # 发送步骤开始事件
+        wire_send(StepBegin(n=1))
+
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:175-183
+    """
+    wire = get_wire_or_none()
+    assert wire is not None, "Wire is expected to be set when soul is running"
+    wire.soul_side.send(msg)
+
+
+async def run_soul(
+    soul: Soul,
+    user_input: str | list[ContentPart],
+    ui_loop_fn: UILoopFn,
+    cancel_event: asyncio.Event,
+) -> None:
+    """
+    运行 Soul 并连接到 UI Loop（通过 Wire）
+
+    这是 Wire 机制的核心函数！
+    它创建 Wire，启动 Soul 和 UI Loop，并处理取消事件。
+
+    流程：
+    1. 创建 Wire 并设置到 ContextVar
+    2. 启动 UI Loop 任务（接收 Wire 消息）
+    3. 启动 Soul 任务（处理用户输入）
+    4. 等待 Soul 完成或取消事件
+    5. 关闭 Wire 并等待 UI Loop 退出
+
+    Args:
+        soul: Soul 实例
+        user_input: 用户输入（字符串或 ContentPart 列表）
+        ui_loop_fn: UI Loop 函数（接收 WireUISide）
+        cancel_event: 取消事件（用户按 Ctrl+C 时设置）
+
+    Raises:
+        LLMNotSet: LLM 未配置
+        RunCancelled: 用户取消运行
+
+    使用示例：
+        # 创建取消事件
+        cancel_event = asyncio.Event()
+
+        # 定义 UI Loop
+        async def print_ui_loop(wire_ui: WireUISide):
+            while True:
+                msg = await wire_ui.receive()
+                # 渲染消息...
+
+        # 运行 Soul
+        await run_soul(soul, "你好", print_ui_loop, cancel_event)
+
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:101-161
+    """
+    # 1. 创建 Wire 并设置到 ContextVar
+    wire = Wire()
+    wire_token = _current_wire.set(wire)
+
+    # 2. 启动 UI Loop 任务
+    ui_task = asyncio.create_task(ui_loop_fn(wire.ui_side))
+
+    # 3. 启动 Soul 任务
+    soul_task = asyncio.create_task(soul.run(user_input)) #
+
+    # 4. 等待 Soul 完成或取消事件（哪个先完成就处理哪个）
+    cancel_event_task = asyncio.create_task(cancel_event.wait())
+    await asyncio.wait(
+        [soul_task, cancel_event_task],
+        return_when=asyncio.FIRST_COMPLETED, #
+    )
+
+    try:
+        # 5a. 如果是取消事件，取消 Soul 任务
+        if cancel_event.is_set():
+            soul_task.cancel()
+            try:
+                await soul_task
+            except asyncio.CancelledError:
+                raise RunCancelled from None
+        # 5b. 如果 Soul 完成，取消取消事件任务
+        else:
+            assert soul_task.done()
+            cancel_event_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cancel_event_task
+            soul_task.result()  # 如果 Soul 抛异常，这里会重新抛出
+    finally:
+        # 6. 关闭 Wire（会导致 UI Loop 退出）
+        wire.shutdown()
+        try:
+            await asyncio.wait_for(ui_task, timeout=0.5)
+        except asyncio.QueueShutDown:
+            # UI Loop 正常退出
+            pass
+        except TimeoutError:
+            # UI Loop 超时（可能卡住了）
+            pass
+        finally:
+            # 7. 重置 ContextVar
+            _current_wire.reset(wire_token)
+
+
+# ============================================================
+# TODO: Stage 7+ 扩展（参考官方）
+# ============================================================
+# 官方参考：kimi-cli-fork/src/kimi_cli/soul/__init__.py
+#
+# Stage 7+ 需要添加的异常类：
+#
+# class LLMNotSupported(Exception):
+#     """LLM 不支持所需能力（image_in, thinking 等）"""
+#     def __init__(self, llm: LLM, capabilities: list[ModelCapability]):
+#         self.llm = llm
+#         self.capabilities = capabilities
+#         super().__init__(f"LLM model '{llm.model_name}' does not support ...")
+#
+# class MaxStepsReached(Exception):
+#     """达到最大步数限制"""
+#     n_steps: int
+#     def __init__(self, n_steps: int):
+#         self.n_steps = n_steps
+# ============================================================
