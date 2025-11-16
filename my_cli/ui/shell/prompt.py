@@ -24,6 +24,7 @@ Shell UI Prompt 模块（输入处理）⭐ Stage 12 增强版
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, override
@@ -31,6 +32,7 @@ from typing import TYPE_CHECKING, override
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
+from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 
@@ -41,6 +43,33 @@ if TYPE_CHECKING:
 PROMPT_SYMBOL = "✨"
 PROMPT_SYMBOL_SHELL = "$"
 PROMPT_SYMBOL_THINKING = "💫"
+
+
+# ============================================================
+# Prompt 模式 ⭐ Stage 13 新增
+# ============================================================
+
+
+class PromptMode(Enum):
+    """
+    Prompt 模式枚举 ⭐ Stage 13
+
+    支持的模式：
+    - AGENT: LLM 对话模式（默认）
+    - SHELL: Shell 命令模式
+
+    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:386-391
+    """
+
+    AGENT = "agent"
+    SHELL = "shell"
+
+    def toggle(self) -> "PromptMode":
+        """切换模式"""
+        return PromptMode.SHELL if self == PromptMode.AGENT else PromptMode.AGENT
+
+    def __str__(self) -> str:
+        return self.value
 
 
 # ============================================================
@@ -121,16 +150,8 @@ class MetaCommandCompleter(Completer):
 
 
 # ============================================================
-# 输入模式 ⭐ Stage 12 增强
+# 输入封装 ⭐ Stage 12
 # ============================================================
-
-
-class PromptMode(Enum):
-    """输入模式"""
-
-    NORMAL = "normal"  # 普通模式（发送到 LLM）
-    SHELL = "shell"  # Shell 模式（执行 Shell 命令）
-    THINKING = "thinking"  # 思考模式（启用 Thinking）
 
 
 class UserInput:
@@ -139,7 +160,7 @@ class UserInput:
     def __init__(
         self,
         command: str,
-        mode: PromptMode = PromptMode.NORMAL,
+        mode: PromptMode = PromptMode.AGENT,  # ⭐ Stage 13: 使用新的 PromptMode
         thinking: bool = False,
     ):
         self.command = command
@@ -184,6 +205,11 @@ class CustomPromptSession:
         """
         self.work_dir = work_dir or Path.cwd()
 
+        # ============================================================
+        # Stage 13：初始化模式状态 ⭐
+        # ============================================================
+        self._mode = PromptMode.AGENT  # 默认 Agent 模式
+
         # 创建历史记录
         if enable_file_history:
             # 文件历史（持久化）
@@ -203,7 +229,7 @@ class CustomPromptSession:
             self.completer = None
 
         # ============================================================
-        # Stage 12：创建自定义键绑定 ⭐
+        # Stage 13：创建自定义键绑定（多行 + 模式切换）⭐
         # ============================================================
         kb = KeyBindings()
 
@@ -219,16 +245,63 @@ class CustomPromptSession:
             """
             event.current_buffer.insert_text("\n")
 
+        @kb.add("c-x", eager=True)
+        def _toggle_mode(event: KeyPressEvent) -> None:
+            """
+            切换模式（Agent/Shell）⭐ Stage 13
+
+            快捷键：
+            - Ctrl+X: 切换模式
+            """
+            self._mode = self._mode.toggle()
+            # 重绘 UI（更新状态栏）
+            event.app.invalidate()
+
         # ============================================================
-        # 创建 PromptSession（集成补全器和键绑定）⭐ Stage 12
+        # Stage 13：创建 PromptSession（集成状态栏）⭐
         # ============================================================
         self.session = PromptSession(
             history=self.history,
             completer=self.completer,  # ⭐ 自动补全
-            key_bindings=kb,  # ⭐ 自定义键绑定
+            key_bindings=kb,  # ⭐ 自定义键绑定（多行 + 模式切换）
             multiline=False,  # 默认单行（Ctrl+J 换行）
             enable_history_search=True,  # 启用历史搜索
+            bottom_toolbar=self._render_bottom_toolbar,  # ⭐ Stage 13: 状态栏
         )
+
+    def _render_bottom_toolbar(self) -> FormattedText:
+        """
+        渲染底部状态栏 ⭐ Stage 13
+
+        显示内容：
+        - 当前时间（HH:MM 格式）
+        - 当前模式（agent/shell）
+        - 快捷键提示
+
+        Returns:
+            FormattedText 对象
+
+        TODO (Stage 14+):
+        - 添加 Thinking 状态显示
+        - 添加 Context 使用率
+        - 添加当前模型名称
+        - 支持自定义主题颜色
+        """
+        fragments: list[tuple[str, str]] = []
+
+        # 添加时间
+        now_text = datetime.now().strftime("%H:%M")
+        fragments.extend([("", now_text), ("", " " * 2)])
+
+        # 添加模式（颜色区分）
+        mode_text = str(self._mode).lower()
+        mode_style = "bg:#ff6b6b" if self._mode == PromptMode.SHELL else "bg:#4ecdc4"
+        fragments.extend([(mode_style, f" {mode_text} "), ("", " " * 2)])
+
+        # 添加快捷键提示
+        fragments.append(("class:bottom-toolbar.text", "ctrl-x: 切换模式  ctrl-d: 退出"))
+
+        return FormattedText(fragments)
 
     async def prompt(self) -> UserInput:
         """
@@ -238,6 +311,7 @@ class CustomPromptSession:
         - ✅ 支持 Tab 键触发自动补全
         - ✅ 支持 Ctrl+J 插入换行（多行输入）
         - ✅ 支持 Ctrl+R 搜索历史
+        - ✅ 支持 Ctrl+X 切换模式 ⭐ Stage 13
 
         Returns:
             UserInput 对象
