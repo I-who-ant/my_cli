@@ -8,7 +8,164 @@
 1. 实现 MetaCommandCompleter（/命令自动补全）
 2. 添加多行输入支持（Ctrl+J / Alt+Enter）
 3. 集成自定义键绑定
-4. 创建测试验证完整功能
+4. ⭐ **修复光标混乱 bug**（使用 rich.live.Live）
+5. 创建测试验证完整功能
+
+---
+
+## 🐛 关键 Bug 修复：光标混乱问题 ⭐ 重要修复
+
+### Bug 描述
+
+**用户报告**："有些混乱，光标会出现在LLM生成的信息中，且可以随意使用Backspace删减去"
+
+**具体表现**：
+```
+✨ You: ?
+Hello! H?w can I help you today✨ You::
+        ↑ 光标出现在这里！用户可以删除 LLM 输出！
+```
+
+### 根本原因
+
+**Stage 11 的实现**（❌ 错误方式）：
+```python
+# visualize.py - Stage 11 版本
+async def visualize(wire_ui: WireUISide) -> None:
+    while True:
+        msg = await wire_ui.receive()
+        if isinstance(msg, TextPart):
+            # ❌ 直接 console.print() 输出
+            console.print(msg.text, end="", markup=False)
+```
+
+**问题分析**：
+1. `console.print()` 直接输出到 stdout
+2. stdout 和 `PromptSession` 的输入缓冲区混在一起
+3. 光标位置无法控制，出现在 LLM 输出中间
+4. 用户可以用 Backspace 删除 LLM 的输出（严重bug）
+
+### 修复方案：rich.live.Live ⭐ 官方方案
+
+**用户建议**："要不按照官方的rich精简版实现来解决？"
+
+**Stage 12 的实现**（✅ 正确方式）：
+```python
+# visualize.py - Stage 12 Live 修复版
+from rich.live import Live
+from rich.text import Text
+
+async def visualize(wire_ui: WireUISide) -> None:
+    # 累积的文本内容
+    content_text = Text()
+
+    # ⭐ 使用 Live 创建独立渲染区域
+    with Live(
+        content_text,
+        console=console,
+        refresh_per_second=10,  # 每秒刷新 10 次
+        transient=False,  # 内容不是临时的，结束后保留
+    ) as live:
+        while True:
+            msg = await wire_ui.receive()
+
+            # 文本片段：累积并更新显示
+            if isinstance(msg, TextPart):
+                if msg.text:
+                    content_text.append(msg.text)  # ⭐ 追加到 Text 对象
+                    live.update(content_text)  # ⭐ 实时刷新 Live 区域
+
+            # ... 其他消息类型处理
+```
+
+### 为什么 Live 能解决问题？
+
+**Live 的工作原理**：
+
+```
+┌──────────────────────────────────────────────────┐
+│  Live 渲染区域（上方）                            │
+│  ┌────────────────────────────────────────────┐  │
+│  │ Hello! How can I help you today?           │  │
+│  │                                            │  │
+│  │ 🔧 调用工具: list_files                    │  │
+│  │    参数: {"path": "/tmp"}                  │  │
+│  │ ✅ 工具成功                                │  │
+│  │    输出: file1.txt, file2.txt              │  │
+│  └────────────────────────────────────────────┘  │
+│                                                  │
+│  （Live 区域和输入区域完全隔离）                   │
+│                                                  │
+│  PromptSession 输入区域（下方）                   │
+│  ┌────────────────────────────────────────────┐  │
+│  │ ✨ You: █                                  │  │
+│  │         ↑ 光标始终在这里                     │  │
+│  └────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────┘
+```
+
+**关键特性**：
+
+1. ✅ **独立渲染区域**：Live 在上方创建独立区域，不影响下方输入
+2. ✅ **实时刷新机制**：`live.update()` 刷新 Live 区域，不触碰输入区域
+3. ✅ **光标完全隔离**：光标始终在 PromptSession 区域，不会出现在 Live 区域
+4. ✅ **内容不可删除**：Live 区域的内容不受输入影响，Backspace 只作用于输入区域
+
+### 实现细节：helper 函数改造
+
+**旧版本**（❌ 直接 console.print）：
+```python
+def _render_tool_call(tool_call: ToolCall) -> None:
+    """渲染工具调用"""
+    console.print(f"\n\n[yellow]🔧 调用工具: {tool_call.function.name}[/yellow]")
+    # ❌ 直接输出到 stdout，会与输入混合
+```
+
+**新版本**（✅ 追加到 Text 对象）：
+```python
+def _render_tool_call_to_text(tool_call: ToolCall, text: Text) -> None:
+    """渲染工具调用到 Text 对象 ⭐ Stage 12 Live 修复版"""
+    # ✅ 追加到 Text 对象，由 Live 统一刷新
+    text.append("\n\n🔧 调用工具: ", style="yellow")
+    text.append(tool_call.function.name, style="yellow")
+    text.append("\n")
+    # ... 参数格式化
+```
+
+**关键改变**：
+- 参数从 `无` 改为 `text: Text`（累积文本对象）
+- 输出从 `console.print()` 改为 `text.append()`
+- 由 `live.update(content_text)` 统一刷新显示
+
+### 测试验证
+
+**测试脚本**：`test_live_fix.py`
+
+**测试场景**：
+1. ✅ **流式输出隔离**：模拟 LLM 逐字输出，验证光标位置
+2. ✅ **样式兼容性**：验证 rich 样式（颜色、加粗）正常显示
+3. ✅ **工具调用显示**：验证工具调用和结果格式正确
+
+**测试结果**（全部通过）：
+```
+✅ LLM 输出出现在上方（Live 区域）
+✅ 光标始终在下方（输入区域）
+✅ Live 结束后，内容保留在终端
+✅ 光标不会出现在 LLM 输出中间
+✅ 样式正确显示（黄色、绿色、灰色、红色加粗）
+```
+
+### 修复对比总结
+
+| 方面 | Stage 11（❌ 错误） | Stage 12（✅ 正确） |
+|------|---------------------|---------------------|
+| **输出方式** | `console.print()` 直接输出 | `Text.append()` 累积 + `Live.update()` 刷新 |
+| **区域隔离** | ❌ 无隔离，混在一起 | ✅ Live 区域和输入区域完全隔离 |
+| **光标位置** | ❌ 出现在 LLM 输出中 | ✅ 始终在输入区域 |
+| **Backspace** | ❌ 可删除 LLM 输出 | ✅ 只能删除输入内容 |
+| **流式体验** | ⚠️ 正常但混乱 | ✅ 流畅且清晰 |
+
+**这就是官方 kimi-cli 使用 rich.live.Live 的核心原因！**
 
 ---
 
