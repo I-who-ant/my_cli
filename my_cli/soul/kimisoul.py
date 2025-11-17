@@ -25,7 +25,7 @@ from my_cli.soul.runtime import Runtime
 from my_cli.wire.message import StepBegin
 
 if TYPE_CHECKING:
-    from my_cli.soul import wire_send  # 避免循环导入
+    from my_cli.soul import wire_send, StatusSnapshot  # 避免循环导入，仅用于类型提示
 
 
 class KimiSoul:
@@ -72,120 +72,370 @@ class KimiSoul:
         # 从 Runtime 的 ChatProvider 获取模型名称
         return self._runtime.chat_provider.model_name
 
+    @property
+    def model_capabilities(self) -> set[str] | None:
+        """
+        实现 Soul Protocol: model_capabilities 属性 ⭐ Stage 16
+
+        Returns:
+            set[str] | None: 能力集合，None 表示未配置 LLM
+
+        官方实现：
+        - 从 self._runtime.llm.capabilities 获取
+        - LLM 类根据模型配置返回能力集合
+
+        简化版实现：
+        - 如果 ChatProvider 有 capabilities 属性，返回它
+        - 否则返回 None
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:102-106
+        """
+        # 简化版：检查 ChatProvider 是否有 capabilities 属性
+        if hasattr(self._runtime.chat_provider, "capabilities"):
+            return self._runtime.chat_provider.capabilities
+        return None
+
+    @property
+    def status(self) -> "StatusSnapshot":
+        """
+        实现 Soul Protocol: status 属性 ⭐ Stage 16
+
+        Returns:
+            StatusSnapshot: 包含 context_usage 等状态信息
+
+        官方实现：
+        - return StatusSnapshot(context_usage=self._context_usage)
+        - _context_usage 使用 token_count / max_context_size 计算
+
+        简化版实现：
+        - 同官方实现，但 token_count 初始为 0
+        - 通过 Context.update_token_count() 手动更新
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:108-110
+        """
+        from my_cli.soul import StatusSnapshot
+
+        return StatusSnapshot(context_usage=self._context_usage)
+
+    @property
+    def _context_usage(self) -> float:
+        """
+        计算 Context 使用率 ⭐ Stage 16
+
+        Returns:
+            float: 使用率（0.0 ~ 1.0）
+
+        官方实现：
+        - if self._runtime.llm is not None:
+        -     return self._context.token_count / self._runtime.llm.max_context_size
+        - return 0.0
+
+        简化版实现：
+        - 使用固定的 max_context_size = 32000
+        - token_count 从 Context 获取
+        - 如果没有 token_count，估算为 message_count * 500
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:116-120
+        """
+        # 简化版：使用固定 max_context_size
+        max_context_size = 32000
+
+        # 获取 token_count
+        token_count = self._context.token_count
+
+        # 如果 token_count 为 0，估算为 message_count * 500
+        if token_count == 0:
+            message_count = len(self._context.messages)
+            token_count = message_count * 500
+
+        # 计算使用率
+        return min(token_count / max_context_size, 1.0)
+
+    @property
+    def message_count(self) -> int:
+        """
+        实现 Soul Protocol: message_count 属性 ⭐ Stage 16
+
+        Returns:
+            int: 当前对话轮次数（包括用户和助手消息）
+        """
+        return len(self._context.messages)
+
     async def run(self, user_input: str) -> None:
         """
-        实现 Soul Protocol: run() 方法（Stage 8: Agent 循环版本）⭐
+        实现 Soul Protocol: run() 方法 ⭐ Stage 16 按官方实现完善
 
-        流程：
-        1. 添加用户消息到 Context
-        2. 进入 Agent 循环：
-           - 调用 kosong.step() 生成响应（可能包含工具调用）
-           - 执行工具调用（kosong.step() 自动处理）
-           - 将结果添加到 Context
-           - 如果 LLM 调用了工具，继续循环
-           - 如果 LLM 没调用工具，退出循环
+        流程（官方模式）：
+        1. 检查 LLM 是否配置（raise LLMNotSet）
+        2. 检查消息能力（raise LLMNotSupported）- Stage 16 简化版跳过
+        3. 添加用户消息到 Context
+        4. 调用 _agent_loop() 进入 Agent 循环 ⭐ 官方模式
 
-        注意：
-        - Stage 8 使用 kosong.step() API（支持工具调用）
-        - 通过 on_message_part=wire_send 实时发送流式片段
-        - 通过 on_tool_result=wire_send 实时发送工具结果
-        - Agent 循环最多 20 步（防止无限循环）
+        官方实现：
+        ```python
+        if self._runtime.llm is None:
+            raise LLMNotSet()
+
+        user_message = Message(role="user", content=user_input)
+        if missing_caps := check_message(user_message, self._runtime.llm.capabilities):
+            raise LLMNotSupported(self._runtime.llm, list(missing_caps))
+
+        await self._checkpoint()
+        await self._context.append_message(user_message)
+        await self._agent_loop()
+        ```
+
+        简化版实现：
+        - 只检查 ChatProvider 是否存在
+        - 跳过 capabilities 检查（简化）
+        - 跳过 checkpoint（简化）
+        - 调用 _agent_loop()
 
         Args:
             user_input: 用户输入
 
         Raises:
             LLMNotSet: 如果 LLM 未配置
-        """
-        # 导入 wire_send（避免循环导入，放在函数内）
-        from my_cli.soul import wire_send
+            LLMNotSupported: 如果消息包含 LLM 不支持的能力 (简化版不抛出)
+            MaxStepsReached: 如果达到最大步数限制
 
-        # 1. 添加用户消息
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:144-155
+        """
+        # ============================================================
+        # Stage 16：官方模式检查 ⭐
+        # ============================================================
+        # 1. 检查 LLM 是否配置
+        from my_cli.soul import LLMNotSet
+
+        if not self._runtime.chat_provider:
+            raise LLMNotSet()
+
+        # 2. 检查消息能力（简化版跳过）
+        # 官方实现：
+        # user_message = Message(role="user", content=user_input)
+        # if missing_caps := check_message(user_message, self._runtime.llm.capabilities):
+        #     raise LLMNotSupported(self._runtime.llm, list(missing_caps))
+
+        # 3. 添加用户消息
         user_msg = Message(role="user", content=user_input)
         await self._context.append_message(user_msg)
 
-        # ============================================================
-        # Stage 8: Agent 循环 + kosong.step() ⭐
-        # ============================================================
-        # 2. Agent 循环（最多 20 步）
+        # 4. 调用 _agent_loop() ⭐ 官方模式
+        await self._agent_loop()
+
+    async def _agent_loop(self) -> None:
+        """
+        Agent 循环（主循环）⭐ Stage 16 按官方实现
+
+        官方实现要点：
+        1. step_no 从 1 开始循环
+        2. 每步发送 StepBegin 事件
+        3. 调用 _step() 执行一步 ⭐ 官方模式
+        4. _step() 返回 should_stop（True 表示没有工具调用，应该停止）
+        5. 如果 should_stop，return（完成）
+        6. 如果达到最大步数，raise MaxStepsReached
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:157-205
+        """
+        from my_cli.soul import MaxStepsReached, wire_send
+
         MAX_STEPS = 20
         step_no = 1
 
-        while step_no <= MAX_STEPS:
+        while True:
             # 发送步骤开始事件
             wire_send(StepBegin(n=step_no))
 
-            try:
-                # 3. 调用 kosong.step()（一次 LLM 调用 + 工具执行）
-                result = await kosong.step(
-                    chat_provider=self._runtime.chat_provider,
-                    system_prompt=self._agent.system_prompt,
-                    toolset=self._toolset,  # ⭐ 传入工具集
-                    history=self._context.get_messages(),
-                    on_message_part=wire_send,  # ⭐ 实时发送流式片段
-                    on_tool_result=wire_send,  # ⭐ 实时发送工具结果
+            # 调用 _step() 执行一步 ⭐ 官方模式
+            should_stop = await self._step()
+
+            # 判断是否继续循环
+            if should_stop:
+                return  # 官方使用 return
+
+            # 继续下一步
+            step_no += 1
+
+            # 检查是否达到最大步数
+            if step_no > MAX_STEPS:
+                raise MaxStepsReached(MAX_STEPS)
+
+    async def _step(self) -> bool:
+        """
+        执行一个步骤 ⭐ Stage 16 最小实现
+
+        官方实现要点：
+        1. 使用 @tenacity.retry 装饰器包装 kosong.step() 调用（重试机制）
+        2. 调用 kosong.step() 获取 StepResult
+        3. 如果有 usage，更新 token_count 并发送 StatusUpdate
+        4. 等待工具执行完成
+        5. 调用 _grow_context() 将结果添加到 Context
+        6. 返回 should_stop（True = 没有工具调用）
+
+        简化版实现：
+        - 跳过 @tenacity.retry 重试机制（Stage 17+）
+        - 跳过 ToolRejectedError 处理（Stage 17+）
+        - 跳过 DenwaRenji D-Mail 机制（Stage 17+）
+        - 直接调用 kosong.step()
+
+        Returns:
+            bool: should_stop（True 表示没有工具调用，应该停止循环）
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:208-277
+        """
+        from my_cli.soul import wire_send
+
+        try:
+            # 调用 kosong.step()（简化版：不使用重试机制）
+            result = await kosong.step(
+                chat_provider=self._runtime.chat_provider,
+                system_prompt=self._agent.system_prompt,
+                toolset=self._toolset,
+                history=self._context.get_messages(),
+                on_message_part=wire_send,
+                on_tool_result=wire_send,
+            )
+
+            # ============================================================
+            # Stage 16：更新 token_count 并发送 StatusUpdate ⭐
+            # ============================================================
+            if result.usage is not None:
+                # 更新 token_count（使用 LLM API 返回的真实值）
+                await self._context.update_token_count(result.usage.input)
+
+                # 发送状态更新事件
+                from my_cli.wire.message import StatusUpdate
+
+                wire_send(StatusUpdate(status=self.status))
+
+            # 等待所有工具执行完成
+            tool_results = await result.tool_results()
+
+            # 调用 _grow_context() 将结果添加到 Context ⭐ 官方模式
+            await self._grow_context(result, tool_results)
+
+            # 返回 should_stop
+            # 如果 LLM 没有调用工具，说明任务完成
+            return not result.tool_calls
+
+        except Exception as e:
+            # 发生错误时通过 Wire 发送错误消息并重新抛出
+            error_text = f"\n\n❌ LLM API 调用失败: {str(e)}\n"
+            wire_send(TextPart(text=error_text))
+            raise
+
+    async def _grow_context(
+        self, result: "kosong.StepResult", tool_results: list["kosong.tooling.ToolResult"]
+    ) -> None:
+        """
+        将 StepResult 和 ToolResult 添加到 Context ⭐ Stage 16 最小实现
+
+        官方实现要点：
+        1. 检查工具消息的能力（raise LLMNotSupported）
+        2. 将 assistant 消息添加到 Context
+        3. 将 tool 消息添加到 Context
+        4. 使用 asyncio.shield 防止中断
+
+        简化版实现：
+        - 跳过 capabilities 检查（Stage 17+）
+        - 跳过 asyncio.shield（Stage 17+）
+        - 直接添加消息到 Context
+
+        Args:
+            result: kosong.step() 的返回结果
+            tool_results: 工具执行结果列表
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:279-300
+        """
+        # 1. 将 LLM 响应（assistant 消息）添加到 Context
+        await self._context.append_message(result.message)
+
+        # 2. 将工具结果转换为消息并添加到 Context
+        if tool_results:
+            for tr in tool_results:
+                # 简化版：直接创建 tool role 消息
+                # 官方使用 tool_result_to_message() 辅助函数
+                if hasattr(tr.result, "output"):
+                    output_str = str(tr.result.output)
+                else:
+                    output_str = str(tr.result)
+
+                tool_msg = Message(
+                    role="tool",
+                    content=[TextPart(text=output_str)],
+                    tool_call_id=tr.tool_call_id,
                 )
+                await self._context.append_message(tool_msg)
 
-                # 4. 等待所有工具执行完成
-                tool_results = await result.tool_results()
-
-                # 5. 将 LLM 响应添加到 Context
-                await self._context.append_message(result.message)
-
-                # 6. 将工具结果转换为消息并添加到 Context
-                # TODO: Stage 9+ 优化：实现 tool_result_to_message() 函数
-                # 官方实现：kimi-cli-fork/src/kimi_cli/soul/message.py:tool_result_to_message()
-                # 优化点：
-                # - 错误消息格式化（添加 <system>ERROR:</system> 标签）
-                # - ToolRuntimeError 特殊处理
-                # - 空输出提示
-                # Stage 8 简化版：直接创建 tool role 消息
-                if tool_results:
-                    for tr in tool_results:
-                        # 创建 tool 角色消息
-                        from kosong.message import TextPart
-
-                        # 简化版：直接用 output 作为内容
-                        if hasattr(tr.result, "output"):
-                            output_str = str(tr.result.output)
-                        else:
-                            output_str = str(tr.result)
-
-                        tool_msg = Message(
-                            role="tool",
-                            content=[TextPart(text=output_str)],
-                            tool_call_id=tr.tool_call_id,
-                        )
-                        await self._context.append_message(tool_msg)
-
-                # 7. 判断是否继续循环
-                # 如果 LLM 没有调用工具，说明它认为任务完成了
-                if not result.tool_calls:
-                    break
-
-                # 继续下一步
-                step_no += 1
-
-            except Exception as e:
-                # 发生错误时通过 Wire 发送错误消息
-                error_text = f"\n\n❌ LLM API 调用失败: {str(e)}\n"
-                wire_send(TextPart(text=error_text))
-                raise
-
-        # 8. 如果达到最大步数，发送警告
-        if step_no > MAX_STEPS:
-            warning_text = f"\n\n⚠️ 达到最大步数限制 ({MAX_STEPS})，Agent 循环终止。\n"
-            wire_send(TextPart(text=warning_text))
+    # ============================================================
+    # TODO: Stage 17+ 完整方法（参考官方）
+    # ============================================================
+    # 官方参考：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py
+    #
+    # Stage 17+（高级特性）需要添加：
+    #
+    # 1. _checkpoint() 方法（Context 检查点）：
+    #    async def _checkpoint(self):
+    #        """Create a checkpoint before running the agent loop."""
+    #        await self._context.checkpoint()
+    #
+    # 2. compact_context() 方法（Context 压缩）：
+    #    async def compact_context(self) -> None:
+    #        """Compact the context to reduce token usage."""
+    #        wire_send(CompactionBegin())
+    #        summary_messages = await self._compact_with_retry()
+    #        await self._context.compact(summary_messages)
+    #        wire_send(CompactionEnd())
+    #
+    # 3. set_thinking() 方法（Thinking 模式切换）：
+    #    def set_thinking(self, enabled: bool) -> None:
+    #        """Enable or disable thinking mode."""
+    #        self._thinking_effort = "high" if enabled else None
+    #
+    # 4. _is_retryable_error() 静态方法（错误重试判断）：
+    #    @staticmethod
+    #    def _is_retryable_error(exception: BaseException) -> bool:
+    #        """Determine if an error is retryable."""
+    #        # 检查 APIError, ConnectionError 等
+    #
+    # 5. _retry_log() 静态方法（重试日志）：
+    #    @staticmethod
+    #    def _retry_log(name: str, retry_state: RetryCallState):
+    #        """Log retry attempts."""
+    #        # 记录重试信息
+    #
+    # 6. 在 _step() 中使用 @tenacity.retry 装饰器：
+    #    @tenacity.retry(
+    #        retry=retry_if_exception(self._is_retryable_error),
+    #        wait=wait_exponential_jitter(initial=0.3, max=5, jitter=0.5),
+    #        stop=stop_after_attempt(max_retries),
+    #        reraise=True,
+    #    )
+    #    async def _kosong_step_with_retry() -> StepResult:
+    #        return await kosong.step(...)
+    #
+    # 7. DenwaRenji 机制（时间旅行 D-Mail）：
+    #    - 在 _step() 中处理 BackToTheFuture 异常
+    #    - 实现 _denwa_renji.fetch_pending_dmail()
+    #
+    # 8. ToolRejectedError 处理：
+    #    - 在 _step() 中检查 tool_results 是否有被拒绝的工具
+    #    - rejected = any(isinstance(result.result, ToolRejectedError) for result in results)
+    #
+    # 9. asyncio.shield 保护：
+    #    - 在 _grow_context() 中使用 shield 防止 Context 操作被中断
+    #    - await asyncio.shield(self._grow_context(result, results))
+    #
+    # 10. Approval 系统集成：
+    #     - 在 _agent_loop() 中启动 _pipe_approval_to_wire() 任务
+    #     - 处理批准请求（ApprovalRequest）
+    # ============================================================
 
     @property
     def context(self) -> Context:
         """获取 Context（只读）"""
         return self._context
 
-    @property
-    def message_count(self) -> int:
-        """获取消息数量"""
-        return len(self._context)
 
 
 

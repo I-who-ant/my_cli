@@ -18,18 +18,25 @@
   * ToolResult（工具返回结果）- 从 kosong.tooling 导入
   * ToolCallPart（工具调用片段）- 从 kosong.message 导入
 
-- Stage 8+：高级消息类型（待实现）
+- Stage 16：状态更新消息 ⭐ 当前
+  * StatusUpdate（状态更新事件）
+
+- Stage 17+：高级消息类型（待实现）
   * CompactionBegin/CompactionEnd（Context 压缩）
-  * StatusUpdate（状态更新）
   * ApprovalRequest（批准请求）
   * SubagentEvent（子 Agent 事件）
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from kosong.message import ContentPart, ToolCall, ToolCallPart
 from kosong.tooling import ToolResult
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from my_cli.soul import StatusSnapshot  # 避免循环导入
 
 
 # ============================================================
@@ -65,14 +72,33 @@ class StepInterrupted(BaseModel):
 
 
 # ============================================================
-# Stage 6：事件类型定义 ✅
+# Stage 16：状态更新事件 ⭐
 # ============================================================
 
-# 控制流事件（Stage 6 只包含 StepBegin 和 StepInterrupted）
-type ControlFlowEvent = StepBegin | StepInterrupted
-"""控制流事件：步骤控制、压缩控制、状态更新等"""
 
-# Event 联合类型（Stage 6-7）
+class StatusUpdate(BaseModel):
+    """
+    状态更新事件 ⭐ Stage 16
+
+    当 Soul 状态发生变化时发送（例如 token_count 更新后）。
+    UI 层收到后可以更新状态栏显示。
+
+    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:51-53
+    """
+
+    status: "StatusSnapshot"
+    """Soul 的当前状态快照"""
+
+
+# ============================================================
+# Stage 16：事件类型定义扩展 ⭐
+# ============================================================
+
+# 控制流事件（Stage 16 新增 StatusUpdate）
+type ControlFlowEvent = StepBegin | StepInterrupted | StatusUpdate  # ⭐ 新增 StatusUpdate
+"""控制流事件：步骤控制、状态更新等"""
+
+# Event 联合类型（Stage 6-7-16）
 type Event = ControlFlowEvent | ContentPart | ToolCall | ToolCallPart | ToolResult
 """
 所有事件类型的联合
@@ -86,9 +112,11 @@ Stage 6 包含：
 Stage 7 新增：
 - ToolResult: 工具执行结果 ⭐
 
-Stage 8+ 扩展：
+Stage 16 新增：
+- StatusUpdate: 状态更新（context_usage 等）⭐
+
+Stage 17+ 扩展：
 - CompactionBegin/CompactionEnd: Context 压缩控制
-- StatusUpdate: 状态更新（context_usage 等）
 - SubagentEvent: 子 Agent 事件
 """
 

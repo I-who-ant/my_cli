@@ -70,6 +70,8 @@ __all__ = [
     "create_soul",
     # 异常类（UI 层需要捕获）
     "LLMNotSet",
+    "LLMNotSupported",  # ⭐ Stage 16 新增
+    "MaxStepsReached",  # ⭐ Stage 16 新增
     "RunCancelled",
     # Wire 机制相关
     "run_soul",
@@ -81,7 +83,7 @@ __all__ = [
 ]
 
 # ============================================================
-# Stage 6：异常类定义 ✅
+# Stage 16：异常类定义扩展 ⭐
 # ============================================================
 
 
@@ -91,10 +93,60 @@ class LLMNotSet(Exception):
 
     当尝试调用 LLM 但未配置 API Key 时抛出。
 
-    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:19-22
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:18-21
     """
 
     pass
+
+
+class LLMNotSupported(Exception):
+    """
+    LLM 不支持所需能力异常 ⭐ Stage 16 新增
+
+    当 LLM 不支持所需的能力（如 image_in, thinking）时抛出。
+
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:24-34
+    """
+
+    def __init__(self, llm_model_name: str, capabilities: list[str]):
+        """
+        初始化异常
+
+        Args:
+            llm_model_name: LLM 模型名称
+            capabilities: 缺失的能力列表
+
+        简化版实现：
+        - 官方传入 LLM 对象，简化版只传模型名称
+        - 官方使用 ModelCapability 类型，简化版使用 str
+        """
+        self.llm_model_name = llm_model_name
+        self.capabilities = capabilities
+        capabilities_str = "capability" if len(capabilities) == 1 else "capabilities"
+        super().__init__(
+            f"LLM model '{llm_model_name}' does not support required {capabilities_str}: "
+            f"{', '.join(capabilities)}."
+        )
+
+
+class MaxStepsReached(Exception):
+    """
+    达到最大步数限制异常 ⭐ Stage 16 新增
+
+    当 Agent 循环达到最大步数限制时抛出。
+
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:37-44
+    """
+
+    def __init__(self, n_steps: int):
+        """
+        初始化异常
+
+        Args:
+            n_steps: 已执行的步数
+        """
+        self.n_steps = n_steps
+        super().__init__(f"Maximum number of steps reached: {n_steps}")
 
 
 class RunCancelled(Exception):
@@ -157,10 +209,10 @@ class Soul(Protocol):
       * model_name: 模型名称
       * run(): 运行 Agent
 
-    - Stage 6+：扩展接口（待实现）
+    - Stage 16：扩展接口 ⭐ 新增
       * model_capabilities: 模型能力（image_in, thinking）
       * status: 运行状态（context_usage）
-      * set_thinking(): 启用/禁用思考模式
+      * message_count: 消息计数
     """
 
     @property
@@ -171,6 +223,46 @@ class Soul(Protocol):
     @property
     def model_name(self) -> str:
         """使用的 LLM 模型名称"""
+        ...
+
+    @property
+    def model_capabilities(self) -> set[str] | None:
+        """
+        模型能力集合 ⭐ Stage 16 新增
+
+        可能的能力：
+        - "image_in": 支持图片输入
+        - "thinking": 支持思考模式
+
+        Returns:
+            set[str] | None: 能力集合，None 表示未配置 LLM
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:66-69
+        """
+        ...
+
+    @property
+    def status(self) -> StatusSnapshot:
+        """
+        当前状态快照 ⭐ Stage 16 新增
+
+        Returns:
+            StatusSnapshot: 包含 context_usage 等状态信息
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:70-73
+        """
+        ...
+
+    @property
+    def message_count(self) -> int:
+        """
+        消息计数 ⭐ Stage 16 新增
+
+        Returns:
+            int: 当前对话轮次数
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:82-85
+        """
         ...
 
     async def run(self, user_input: str):
@@ -494,24 +586,3 @@ async def run_soul(
             # 7. 重置 ContextVar
             _current_wire.reset(wire_token)
 
-
-# ============================================================
-# TODO: Stage 7+ 扩展（参考官方）
-# ============================================================
-# 官方参考：kimi-cli-fork/src/kimi_cli/soul/__init__.py
-#
-# Stage 7+ 需要添加的异常类：
-#
-# class LLMNotSupported(Exception):
-#     """LLM 不支持所需能力（image_in, thinking 等）"""
-#     def __init__(self, llm: LLM, capabilities: list[ModelCapability]):
-#         self.llm = llm
-#         self.capabilities = capabilities
-#         super().__init__(f"LLM model '{llm.model_name}' does not support ...")
-#
-# class MaxStepsReached(Exception):
-#     """达到最大步数限制"""
-#     n_steps: int
-#     def __init__(self, n_steps: int):
-#         self.n_steps = n_steps
-# ============================================================
