@@ -10,7 +10,7 @@
 
 阶段演进：
 - Stage 8：使用 SimpleToolset ✅
-- Stage 17：实现 CustomToolset（支持 current_tool_call）⭐ TODO
+- Stage 17：实现 CustomToolset（支持 current_tool_call）⭐ 当前
 """
 
 from __future__ import annotations
@@ -102,21 +102,15 @@ class CustomToolset(SimpleToolset):
 
         Returns:
             HandleResult: 工具处理结果
-        """
-        # ============================================================
-        # TODO: Stage 17 完整实现（参考官方）
-        # ============================================================
-        # 官方实现：
-        #
-        # token = current_tool_call.set(tool_call)
-        # try:
-        #     return super().handle(tool_call)
-        # finally:
-        #     current_tool_call.reset(token)
-        # ============================================================
 
-        # 简化版（Stage 8-16）：直接调用父类
-        return super().handle(tool_call)
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/toolset.py:22-28
+        """
+        # ⭐ Stage 17 完整实现（官方做法）
+        token = current_tool_call.set(tool_call)
+        try:
+            return super().handle(tool_call)
+        finally:
+            current_tool_call.reset(token)
 
 
 # ============================================================

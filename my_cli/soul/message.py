@@ -10,7 +10,7 @@ Soul 消息辅助工具 - 消息格式转换和处理
 
 阶段演进：
 - Stage 8：基础工具系统时已简化实现 ✅
-- Stage 17：完整实现 tool_result_to_message() ⭐ TODO
+- Stage 17：完整实现 tool_result_to_message() ⭐ 当前
 - Stage 18：支持图片输出（ImageURLPart）⭐ TODO
 """
 
@@ -58,10 +58,6 @@ def tool_result_to_message(tool_result: ToolResult) -> Message:
        - 使用 tool_ok_to_message_content() 转换
     4. 创建 role="tool" 的 Message
 
-    简化版实现（Stage 8-16）：
-    - 直接将 result 转换为字符串
-    - 不区分 ToolError 和ToolOk
-
     Args:
         tool_result: 工具执行结果
 
@@ -70,38 +66,29 @@ def tool_result_to_message(tool_result: ToolResult) -> Message:
 
     对应源码：kimi-cli-fork/src/kimi_cli/soul/message.py:17-34
     """
-    # ============================================================
-    # TODO: Stage 17 完整实现（参考官方）
-    # ============================================================
-    # 官方实现：
-    #
-    # if isinstance(tool_result.result, ToolError):
-    #     assert tool_result.result.message, "ToolError should have a message"
-    #     message = tool_result.result.message
-    #     if isinstance(tool_result.result, ToolRuntimeError):
-    #         message += "\nThis is an unexpected error and the tool is probably not working."
-    #     content: list[ContentPart] = [system(f"ERROR: {message}")]
-    #     if tool_result.result.output:
-    #         content.extend(_output_to_content_parts(tool_result.result.output))
-    # else:
-    #     content = tool_ok_to_message_content(tool_result.result)
-    #
-    # return Message(
-    #     role="tool",
-    #     content=content,
-    #     tool_call_id=tool_result.tool_call_id,
-    # )
-    # ============================================================
+    # ⭐ Stage 17 完整实现（官方做法）
+    if isinstance(tool_result.result, ToolError):
+        # 工具执行出错：创建错误消息
+        assert tool_result.result.message, "ToolError should have a message"
+        message = tool_result.result.message
 
-    # 简化版（Stage 8-16）：直接转换
-    if hasattr(tool_result.result, "output"):
-        output_str = str(tool_result.result.output)
+        # 如果是运行时错误，添加额外警告
+        if isinstance(tool_result.result, ToolRuntimeError):
+            message += "\nThis is an unexpected error and the tool is probably not working."
+
+        # 创建系统错误消息
+        content: list[ContentPart] = [system(f"ERROR: {message}")]
+
+        # 如果有 output，也添加进去（可能包含错误详情）
+        if tool_result.result.output:
+            content.extend(_output_to_content_parts(tool_result.result.output))
     else:
-        output_str = str(tool_result.result)
+        # 工具执行成功：转换为消息内容
+        content = tool_ok_to_message_content(tool_result.result)
 
     return Message(
         role="tool",
-        content=[TextPart(text=output_str)],
+        content=content,
         tool_call_id=tool_result.tool_call_id,
     )
 
@@ -123,34 +110,34 @@ def tool_ok_to_message_content(result: ToolOk) -> list[ContentPart]:
 
     对应源码：kimi-cli-fork/src/kimi_cli/soul/message.py:37-45
     """
-    # ============================================================
-    # TODO: Stage 17 完整实现（参考官方）
-    # ============================================================
-    # 官方实现：
-    #
-    # content: list[ContentPart] = []
-    # if result.message:
-    #     content.append(system(result.message))
-    # content.extend(_output_to_content_parts(result.output))
-    # if not content:
-    #     content.append(system("Tool output is empty."))
-    # return content
-    # ============================================================
+    # ⭐ Stage 17 完整实现（官方做法）
+    content: list[ContentPart] = []
 
-    # 简化版（Stage 8-16）：直接返回
-    return [TextPart(text=str(result.output))]
+    # 如果有 message，添加为系统消息
+    if result.message:
+        content.append(system(result.message))
+
+    # 转换 output
+    content.extend(_output_to_content_parts(result.output))
+
+    # 如果 content 为空，添加提示
+    if not content:
+        content.append(system("Tool output is empty."))
+
+    return content
 
 
 def _output_to_content_parts(
     output: str | ContentPart | Sequence[ContentPart],
 ) -> list[ContentPart]:
     """
-    将工具输出��换为 ContentPart 列表 ⭐ Stage 18 图片支持
+    将工具输出转换为 ContentPart 列表 ⭐ Stage 17 完整实现
 
     官方实现要点：
     1. 如果 output 是字符串，创建 TextPart
     2. 如果 output 是 ContentPart，直接使用
     3. 如果 output 是 ContentPart 序列，展开
+    4. 跳过空文本片段
 
     Args:
         output: 工具输出
@@ -160,29 +147,24 @@ def _output_to_content_parts(
 
     对应源码：kimi-cli-fork/src/kimi_cli/soul/message.py:48-74
     """
-    # ============================================================
-    # TODO: Stage 18 完整实现（参考官方）
-    # ============================================================
-    # 官方实现：
-    #
-    # content: list[ContentPart] = []
-    # if isinstance(output, str):
-    #     if output.strip():
-    #         content.append(TextPart(text=output))
-    # elif isinstance(output, ContentPart):
-    #     content.append(output)
-    # else:
-    #     for part in output:
-    #         if isinstance(part, TextPart) and not part.text.strip():
-    #             continue
-    #         content.append(part)
-    # return content
-    # ============================================================
+    # ⭐ Stage 17 完整实现（官方做法）
+    content: list[ContentPart] = []
 
-    # 简化版（Stage 8-16）：只支持字符串
     if isinstance(output, str):
-        return [TextPart(text=output)]
-    return []
+        # 字符串：创建 TextPart（跳过空字符串）
+        if output.strip():
+            content.append(TextPart(text=output))
+    elif isinstance(output, ContentPart):
+        # 单个 ContentPart：直接添加
+        content.append(output)
+    else:
+        # ContentPart 序列：展开（跳过空文本片段）
+        for part in output:
+            if isinstance(part, TextPart) and not part.text.strip():
+                continue
+            content.append(part)
+
+    return content
 
 
 # ============================================================

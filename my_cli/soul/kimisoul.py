@@ -13,11 +13,20 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 import kosong
+import tenacity
+from kosong.chat_provider import (
+    APIConnectionError,
+    APIEmptyResponseError,
+    APIStatusError,
+    APITimeoutError,
+)
 from kosong.message import Message, TextPart
 from kosong.tooling import Toolset
+from tenacity import RetryCallState, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 from my_cli.soul.agent import Agent
 from my_cli.soul.context import Context
@@ -262,21 +271,15 @@ class KimiSoul:
 
     async def _step(self) -> bool:
         """
-        执行一个步骤 ⭐ Stage 16 最小实现
+        执行一个步骤 ⭐ Stage 17 完整实现
 
         官方实现要点：
-        1. 使用 @tenacity.retry 装饰器包装 kosong.step() 调用（重试机制）
+        1. 使用 @tenacity.retry 装饰器包装 kosong.step() 调用（重试机制）⭐
         2. 调用 kosong.step() 获取 StepResult
         3. 如果有 usage，更新 token_count 并发送 StatusUpdate
         4. 等待工具执行完成
         5. 调用 _grow_context() 将结果添加到 Context
         6. 返回 should_stop（True = 没有工具调用）
-
-        简化版实现：
-        - 跳过 @tenacity.retry 重试机制（Stage 17+）
-        - 跳过 ToolRejectedError 处理（Stage 17+）
-        - 跳过 DenwaRenji D-Mail 机制（Stage 17+）
-        - 直接调用 kosong.step()
 
         Returns:
             bool: should_stop（True 表示没有工具调用，应该停止循环）
@@ -285,9 +288,18 @@ class KimiSoul:
         """
         from my_cli.soul import wire_send
 
-        try:
-            # 调用 kosong.step()（简化版：不使用重试机制）
-            result = await kosong.step(
+        # ⭐ Stage 17：使用 @tenacity.retry 装饰器包装 kosong.step() 调用
+        # 官方做法：创建内部函数并用 @tenacity.retry 装饰
+        @tenacity.retry(
+            retry=retry_if_exception(self._is_retryable_error),
+            before_sleep=partial(self._retry_log, "step"),
+            wait=wait_exponential_jitter(initial=0.3, max=5, jitter=0.5),
+            stop=stop_after_attempt(3),  # 最多重试 3 次（官方使用 self._loop_control.max_retries_per_step）
+            reraise=True,
+        )
+        async def _kosong_step_with_retry() -> "kosong.StepResult":
+            # 调用 kosong.step()
+            return await kosong.step(
                 chat_provider=self._runtime.chat_provider,
                 system_prompt=self._agent.system_prompt,
                 toolset=self._toolset,
@@ -296,33 +308,30 @@ class KimiSoul:
                 on_tool_result=wire_send,
             )
 
-            # ============================================================
-            # Stage 16：更新 token_count 并发送 StatusUpdate ⭐
-            # ============================================================
-            if result.usage is not None:
-                # 更新 token_count（使用 LLM API 返回的真实值）
-                await self._context.update_token_count(result.usage.input)
+        # 执行 kosong.step()（带重试机制）
+        result = await _kosong_step_with_retry()
 
-                # 发送状态更新事件
-                from my_cli.wire.message import StatusUpdate
+        # ============================================================
+        # Stage 16：更新 token_count 并发送 StatusUpdate ⭐
+        # ============================================================
+        if result.usage is not None:
+            # 更新 token_count（使用 LLM API 返回的真实值）
+            await self._context.update_token_count(result.usage.input)
 
-                wire_send(StatusUpdate(status=self.status))
+            # 发送状态更新事件
+            from my_cli.wire.message import StatusUpdate
 
-            # 等待所有工具执行完成
-            tool_results = await result.tool_results()
+            wire_send(StatusUpdate(status=self.status))
 
-            # 调用 _grow_context() 将结果添加到 Context ⭐ 官方模式
-            await self._grow_context(result, tool_results)
+        # 等待所有工具执行完成
+        tool_results = await result.tool_results()
 
-            # 返回 should_stop
-            # 如果 LLM 没有调用工具，说明任务完成
-            return not result.tool_calls
+        # 调用 _grow_context() 将结果添加到 Context ⭐ 官方模式
+        await self._grow_context(result, tool_results)
 
-        except Exception as e:
-            # 发生错误时通过 Wire 发送错误消息并重新抛出
-            error_text = f"\n\n❌ LLM API 调用失败: {str(e)}\n"
-            wire_send(TextPart(text=error_text))
-            raise
+        # 返回 should_stop
+        # 如果 LLM 没有调用工具，说明任务完成
+        return not result.tool_calls
 
     async def _grow_context(
         self, result: "kosong.StepResult", tool_results: list["kosong.tooling.ToolResult"]
@@ -366,6 +375,58 @@ class KimiSoul:
                     tool_call_id=tr.tool_call_id,
                 )
                 await self._context.append_message(tool_msg)
+
+    # ============================================================
+    # Stage 17：重试机制辅助方法 ⭐
+    # ============================================================
+
+    @staticmethod
+    def _is_retryable_error(exception: BaseException) -> bool:
+        """
+        检查异常是否可重试 ⭐ Stage 17
+
+        官方实现要点：
+        1. 网络相关错误（APIConnectionError, APITimeoutError, APIEmptyResponseError）
+        2. API 状态码错误（429, 500, 502, 503）
+
+        Args:
+            exception: 捕获的异常
+
+        Returns:
+            bool: True 表示可重试，False 表示不可重试
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:329-337
+        """
+        # 网络相关错误：连接失败、超时、空响应
+        if isinstance(exception, (APIConnectionError, APITimeoutError, APIEmptyResponseError)):
+            return True
+
+        # API 状态码错误：429（限流）、500/502/503（服务器错误）
+        return isinstance(exception, APIStatusError) and exception.status_code in (
+            429,  # Too Many Requests
+            500,  # Internal Server Error
+            502,  # Bad Gateway
+            503,  # Service Unavailable
+        )
+
+    @staticmethod
+    def _retry_log(name: str, retry_state: RetryCallState):
+        """
+        记录重试日志 ⭐ Stage 17
+
+        Args:
+            name: 重试的操作名称（"step" 或 "compaction"）
+            retry_state: tenacity 的 RetryCallState 对象
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:340-348
+        """
+        # 简化版：直接打印日志（官方使用 logger.info）
+        sleep_time = (
+            retry_state.next_action.sleep if retry_state.next_action is not None else "unknown"
+        )
+        print(
+            f"⚠️ Retrying {name} for the {retry_state.attempt_number} time. Waiting {sleep_time} seconds."
+        )
 
     # ============================================================
     # TODO: Stage 17+ 完整方法（参考官方）
