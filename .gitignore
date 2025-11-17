@@ -53,3 +53,9 @@ uv.lock      # uv 依赖锁定文件（可选提交，团队项目建议提交�
 
 # API Keys and Config
 .mycli_config.json  # 配置文件（包含 API Key，不要提交！）
+.mycli_config.json.backup  # 配置备份文件
+.mycli_history  # 会话历史文件
+
+# Temporary directories
+.spec-workflow/  # Spec workflow 临时文件
+kosong-main/  # 临时下载的源码
