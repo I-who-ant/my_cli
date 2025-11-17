@@ -29,14 +29,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from kosong.message import ContentPart, ToolCall, ToolCallPart
 from kosong.tooling import ToolResult
 from pydantic import BaseModel
 
-if TYPE_CHECKING:
-    from my_cli.soul import StatusSnapshot  # 避免循环导入
+# ⭐ 官方实现：直接导入 StatusSnapshot（不使用 TYPE_CHECKING）
+# 参考：kimi-cli-fork/src/kimi_cli/wire/message.py:13
+from my_cli.soul import StatusSnapshot
 
 
 # ============================================================
@@ -83,10 +82,10 @@ class StatusUpdate(BaseModel):
     当 Soul 状态发生变化时发送（例如 token_count 更新后）。
     UI 层收到后可以更新状态栏显示。
 
-    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:51-53
+    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:52-54
     """
 
-    status: "StatusSnapshot"
+    status: StatusSnapshot  # ⭐ 官方：直接使用类型，不是字符串
     """Soul 的当前状态快照"""
 
 

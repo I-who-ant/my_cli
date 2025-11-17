@@ -35,10 +35,17 @@ Wire 机制的核心思想：
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from kosong.message import ContentPart, ToolCallPart
 
-from my_cli.wire.message import WireMessage
+# ⭐ 官方做法：使用 TYPE_CHECKING 避免循环导入
+# 参考：kimi-cli-fork/src/kimi_cli/wire/__init__.py:10-11
+if TYPE_CHECKING:
+    from my_cli.wire.message import ApprovalRequest, Event
+
+# WireMessage 类型定义（与 message.py 保持一致）
+type WireMessage = Event | ApprovalRequest  # type: ignore
 
 __all__ = [
     "Wire",

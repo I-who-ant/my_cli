@@ -57,7 +57,8 @@ from kosong.message import ContentPart
 
 from my_cli.config import get_provider_and_model, load_config
 from my_cli.soul.agent import Agent
-from my_cli.soul.kimisoul import KimiSoul
+# ⭐ 延迟导入 KimiSoul 以避免循环导入（官方做法）
+# from my_cli.soul.kimisoul import KimiSoul
 from my_cli.soul.runtime import Runtime
 from my_cli.wire import Wire, WireMessage, WireUISide
 
@@ -314,6 +315,9 @@ def create_soul(
 
     对应源码：kimi-cli-fork/src/kimi_cli/app.py:26-121
     """
+    # ⭐ 延迟导入 KimiSoul 以避免循环导入
+    from my_cli.soul.kimisoul import KimiSoul
+
     # ============================================================
     # Stage 4-5：基础实现 ✅
     # ============================================================
