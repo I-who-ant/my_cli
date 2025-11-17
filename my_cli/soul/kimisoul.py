@@ -78,13 +78,13 @@ class KimiSoul:
     @property
     def model_name(self) -> str:
         """实现 Soul Protocol: model_name 属性"""
-        # 从 Runtime 的 ChatProvider 获取模型名称
-        return self._runtime.chat_provider.model_name
+        # ⭐ Stage 17：从 Runtime 的 LLM 获取模型名称
+        return self._runtime.llm.model_name
 
     @property
     def model_capabilities(self) -> set[str] | None:
         """
-        实现 Soul Protocol: model_capabilities 属性 ⭐ Stage 16
+        实现 Soul Protocol: model_capabilities 属性 ⭐ Stage 17 更新
 
         Returns:
             set[str] | None: 能力集合，None 表示未配置 LLM
@@ -93,16 +93,10 @@ class KimiSoul:
         - 从 self._runtime.llm.capabilities 获取
         - LLM 类根据模型配置返回能力集合
 
-        简化版实现：
-        - 如果 ChatProvider 有 capabilities 属性，返回它
-        - 否则返回 None
-
         对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:102-106
         """
-        # 简化版：检查 ChatProvider 是否有 capabilities 属性
-        if hasattr(self._runtime.chat_provider, "capabilities"):
-            return self._runtime.chat_provider.capabilities
-        return None
+        # ⭐ Stage 17：从 Runtime 的 LLM 获取 capabilities
+        return self._runtime.llm.capabilities
 
     @property
     def status(self) -> "StatusSnapshot":
@@ -216,7 +210,7 @@ class KimiSoul:
         # 1. 检查 LLM 是否配置
         from my_cli.soul import LLMNotSet
 
-        if not self._runtime.chat_provider:
+        if not self._runtime.llm:  # ⭐ Stage 17：改为检查 llm
             raise LLMNotSet()
 
         # 2. 检查消息能力（简化版跳过）
@@ -300,7 +294,7 @@ class KimiSoul:
         async def _kosong_step_with_retry() -> "kosong.StepResult":
             # 调用 kosong.step()
             return await kosong.step(
-                chat_provider=self._runtime.chat_provider,
+                chat_provider=self._runtime.llm.chat_provider,  # ⭐ Stage 17：使用 llm.chat_provider
                 system_prompt=self._agent.system_prompt,
                 toolset=self._toolset,
                 history=self._context.get_messages(),

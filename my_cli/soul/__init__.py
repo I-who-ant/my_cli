@@ -334,18 +334,23 @@ def create_soul(
         work_dir=work_dir,
     )
 
-    # 4. 创建 ChatProvider
-    # Stage 4-5: 只支持 Kimi Provider
-    # Stage 9+: 根据 provider.type 选择不同的 ChatProvider
-    chat_provider = Kimi(
-        base_url=provider.base_url,
-        api_key=provider.api_key.get_secret_value(),
-        model=model.model,
+    # ============================================================
+    # Stage 17：使用 create_llm() 创建 LLM ⭐
+    # ============================================================
+
+    # 4. 创建 LLM（使用 create_llm() 工厂函数）⭐ Stage 17
+    from my_cli.llm import create_llm
+
+    llm = create_llm(
+        provider=provider,
+        model=model,
+        stream=True,
+        session_id=None,  # Stage 17+：传入 session.id
     )
 
-    # 5. 创建 Runtime
+    # 5. 创建 Runtime（传入 LLM）⭐ Stage 17
     runtime = Runtime(
-        chat_provider=chat_provider,
+        llm=llm,  # ⭐ Stage 17：传入 LLM 而不是 ChatProvider
         max_steps=20,
     )
 
