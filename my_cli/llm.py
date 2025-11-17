@@ -41,6 +41,7 @@ ALL_MODEL_CAPABILITIES: set[ModelCapability] = set(get_args(ModelCapability))
 # ============================================================
 
 
+
 @dataclass(slots=True)
 class LLM:
     """
@@ -146,7 +147,8 @@ def create_llm(
                 stream=stream,
                 default_headers={
                     "User-Agent": USER_AGENT,
-                    **(provider.custom_headers or {}),
+                    # ⭐ Stage 17：兼容 custom_headers（可能不存在）
+                    **(provider.custom_headers if hasattr(provider, "custom_headers") and provider.custom_headers else {}),
                 },
             )
             # 如果有 session_id，使用 prompt cache
@@ -224,7 +226,10 @@ def _derive_capabilities(provider: "LLMProvider", model: "LLMModel") -> set[Mode
 
     对应源码：kimi-cli-fork/src/kimi_cli/llm.py:144-151
     """
-    capabilities = model.capabilities or set()
+    # ⭐ Stage 17：兼容 model.capabilities（可能不存在）
+    capabilities = (
+        model.capabilities if hasattr(model, "capabilities") and model.capabilities else set()
+    )
 
     # Kimi 特殊处理：自动添加 thinking 能力
     if provider.type != "kimi":
