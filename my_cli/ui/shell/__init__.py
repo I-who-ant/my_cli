@@ -115,8 +115,12 @@ class ShellApp:
         # 2. 显示欢迎信息
         _print_welcome_info(self.soul.name, self.soul.model_name)
 
-        # 3. 创建 CustomPromptSession（模块化）
-        with CustomPromptSession(work_dir=self.work_dir) as prompt_session:
+        # 3. 创建 CustomPromptSession（模块化）⭐ Stage 16: 传递 status_provider
+        with CustomPromptSession(
+            work_dir=self.work_dir,
+            status_provider=lambda: self.soul.status,  # ⭐ Stage 16: 动态状态回调
+            model_capabilities=self.soul.model_capabilities,  # ⭐ Stage 16: 模型能力
+        ) as prompt_session:
             # 4. 进入输入循环
             while True:
                 try:

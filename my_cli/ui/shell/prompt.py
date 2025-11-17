@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -41,6 +42,8 @@ from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 
 if TYPE_CHECKING:
     from prompt_toolkit.completion import CompleteEvent
+
+    from my_cli.soul import StatusSnapshot  # ⭐ Stage 16: 类型提示
 
 # Prompt 符号
 PROMPT_SYMBOL = "✨"
@@ -406,7 +409,8 @@ class CustomPromptSession:
         work_dir: Path | None = None,
         enable_file_history: bool = True,
         enable_completer: bool = True,
-        model_name: str | None = None,  # ⭐ Stage 15: 模型名称
+        status_provider: Callable[[], "StatusSnapshot"] | None = None,  # ⭐ Stage 16: 状态回调
+        model_capabilities: set[str] | None = None,  # ⭐ Stage 16: 模型能力
     ):
         """
         初始化 CustomPromptSession
@@ -415,11 +419,12 @@ class CustomPromptSession:
             work_dir: 工作目录（用于历史文件）
             enable_file_history: 是否启用文件历史记录
             enable_completer: 是否启用自动补全 ⭐ Stage 12 新增
-            model_name: 当前模型名称 ⭐ Stage 15 新增
+            status_provider: 状态提供器回调函数 ⭐ Stage 16 新增
+            model_capabilities: 模型能力集合 ⭐ Stage 16 新增
         """
         self.work_dir = work_dir or Path.cwd()
-        self.model_name = model_name or "moonshot-v1"  # ⭐ Stage 15: 默认模型
-        self.context_usage = 0.0  # ⭐ Stage 15: Context 使用率（0.0 ~ 1.0）
+        self._status_provider = status_provider  # ⭐ Stage 16: 存储回调
+        self._model_capabilities = model_capabilities or set()  # ⭐ Stage 16: 模型能力
 
         # ============================================================
         # Stage 13：初始化模式状态 ⭐
@@ -495,19 +500,19 @@ class CustomPromptSession:
 
     def _render_bottom_toolbar(self) -> FormattedText:
         """
-        渲染底部状态栏 ⭐ Stage 15 扩展版
+        渲染底部状态栏 ⭐ Stage 16 使用 status_provider
 
         显示内容：
         - 当前时间（HH:MM 格式）
-        - 当前模型名称 ⭐ Stage 15 新增
         - 当前模式（agent/shell）
         - 快捷键提示
-        - Context 使用率（右对齐）⭐ Stage 15 新增
+        - Context 使用率（右对齐，动态获取）⭐ Stage 16
 
         Returns:
             FormattedText 对象
 
-        TODO (Stage 16+):
+        TODO (Stage 17+):
+        - 添加模型名称显示（需要扩展 StatusSnapshot 或单独传递）
         - 添加 Thinking 状态显示
         - 添加 Toast 通知
         - 动态快捷键提示（根据终端宽度）
@@ -517,10 +522,6 @@ class CustomPromptSession:
         # 添加时间
         now_text = datetime.now().strftime("%H:%M")
         fragments.extend([("", now_text), ("", " " * 2)])
-
-        # 添加模型名称 ⭐ Stage 15
-        model_text = f"model:{self.model_name}"
-        fragments.extend([("fg:#888888", model_text), ("", " " * 2)])
 
         # 添加模式（颜色区分）
         mode_text = str(self._mode).lower()
@@ -533,8 +534,13 @@ class CustomPromptSession:
         # 计算已使用的空间
         used_width = sum(len(text) for _, text in fragments)
 
-        # 添加 Context 使用率（右对齐）⭐ Stage 15
-        context_text = f"context: {self.context_usage:.1%}"
+        # 添加 Context 使用率（右对齐，动态获取）⭐ Stage 16
+        if self._status_provider:
+            status = self._status_provider()  # ⭐ 调用回调获取最新状态
+            context_text = f"context: {status.context_usage:.1%}"
+        else:
+            context_text = "context: N/A"
+
         # 计算需要的空白填充（假设终端宽度为 80）
         terminal_width = 80  # 简化版，固定宽度
         padding = max(1, terminal_width - used_width - len(context_text))
@@ -542,18 +548,6 @@ class CustomPromptSession:
         fragments.append(("fg:#888888", context_text))
 
         return FormattedText(fragments)
-
-    def update_context_usage(self, usage: float) -> None:
-        """
-        更新 Context 使用率 ⭐ Stage 15
-
-        Args:
-            usage: 使用率（0.0 ~ 1.0）
-
-        示例：
-            session.update_context_usage(0.35)  # 35%
-        """
-        self.context_usage = max(0.0, min(usage, 1.0))  # 限制在 [0, 1]
 
     async def prompt(self) -> UserInput:
         """
