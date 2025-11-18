@@ -30,8 +30,10 @@ from tenacity import RetryCallState, retry_if_exception, stop_after_attempt, wai
 
 from my_cli.soul.agent import Agent
 from my_cli.soul.context import Context
+from my_cli.soul.message import check_message, system, tool_result_to_message
 from my_cli.soul.runtime import Runtime
 from my_cli.wire.message import StepBegin
+from my_cli.soul import LLMNotSupported
 
 if TYPE_CHECKING:
     from my_cli.soul import wire_send, StatusSnapshot  # 避免循环导入，仅用于类型提示
@@ -331,7 +333,7 @@ class KimiSoul:
         self, result: "kosong.StepResult", tool_results: list["kosong.tooling.ToolResult"]
     ) -> None:
         """
-        将 StepResult 和 ToolResult 添加到 Context ⭐ Stage 16 最小实现
+        将 StepResult 和 ToolResult 添加到 Context ⭐ Stage 17 完整实现
 
         官方实现要点：
         1. 检查工具消息的能力（raise LLMNotSupported）
@@ -339,10 +341,11 @@ class KimiSoul:
         3. 将 tool 消息添加到 Context
         4. 使用 asyncio.shield 防止中断
 
-        简化版实现：
-        - 跳过 capabilities 检查（Stage 17+）
-        - 跳过 asyncio.shield（Stage 17+）
-        - 直接添加消息到 Context
+        Stage 17 完整实现（与官方一致）：
+        ✅ 使用 tool_result_to_message() 批量转换
+        ✅ 使用 check_message() 检查 LLM 能力
+        ✅ 支持 ImageURLPart 和 ThinkPart
+        ✅ 支持多格式输出
 
         Args:
             result: kosong.step() 的返回结果
@@ -350,25 +353,24 @@ class KimiSoul:
 
         对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:279-300
         """
+        # ⭐ Stage 17 完整实现（与官方一致）
         # 1. 将 LLM 响应（assistant 消息）添加到 Context
         await self._context.append_message(result.message)
 
-        # 2. 将工具结果转换为消息并添加到 Context
+        # 2. 批量转换工具结果为消息
         if tool_results:
-            for tr in tool_results:
-                # 简化版：直接创建 tool role 消息
-                # 官方使用 tool_result_to_message() 辅助函数
-                if hasattr(tr.result, "output"):
-                    output_str = str(tr.result.output)
-                else:
-                    output_str = str(tr.result)
+            # 官方实现：使用 tool_result_to_message() 批量转换
+            tool_messages = [tool_result_to_message(tr) for tr in tool_results]
 
-                tool_msg = Message(
-                    role="tool",
-                    content=[TextPart(text=output_str)],
-                    tool_call_id=tr.tool_call_id,
-                )
-                await self._context.append_message(tool_msg)
+            # 3. 检查每个消息并添加到 Context
+            for tm in tool_messages:
+                # 检查消息内容是否被 LLM 支持
+                if missing_caps := check_message(tm, self._runtime.llm.capabilities):
+                    # 不支持：抛出 LLMNotSupported 异常
+                    raise LLMNotSupported(self._runtime.llm, list(missing_caps))
+
+                # 支持：添加到 Context
+                await self._context.append_message(tm)
 
     # ============================================================
     # Stage 17：重试机制辅助方法 ⭐

@@ -63,7 +63,7 @@ from my_cli.soul.runtime import Runtime
 from my_cli.wire import Wire, WireMessage, WireUISide
 
 if TYPE_CHECKING:
-    pass
+    from my_cli.llm import LLM, ModelCapability
 
 __all__ = [
     # 核心接口和工厂
@@ -106,26 +106,24 @@ class LLMNotSupported(Exception):
 
     当 LLM 不支持所需的能力（如 image_in, thinking）时抛出。
 
-    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:24-34
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:24-35
     """
 
-    def __init__(self, llm_model_name: str, capabilities: list[str]):
+    def __init__(self, llm: LLM, capabilities: list[ModelCapability]):
         """
-        初始化异常
+        初始化异常 ⭐ Stage 17 完整实现（与官方一致）
 
         Args:
-            llm_model_name: LLM 模型名称
-            capabilities: 缺失的能力列表
+            llm: LLM 对象（包含模型名称和能力信息）
+            capabilities: 缺失的能力列表（ModelCapability 类型）
 
-        简化版实现：
-        - 官方传入 LLM 对象，简化版只传模型名称
-        - 官方使用 ModelCapability 类型，简化版使用 str
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:28-35
         """
-        self.llm_model_name = llm_model_name
+        self.llm = llm
         self.capabilities = capabilities
         capabilities_str = "capability" if len(capabilities) == 1 else "capabilities"
         super().__init__(
-            f"LLM model '{llm_model_name}' does not support required {capabilities_str}: "
+            f"LLM model '{llm.model_name}' does not support required {capabilities_str}: "
             f"{', '.join(capabilities)}."
         )
 

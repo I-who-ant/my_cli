@@ -1,0 +1,37 @@
+{
+  "default_model": "moonshot-k2",
+  "providers": {
+    "moonshot": {
+      "type": "kimi",
+      "base_url": "https://api.moonshot.cn/v1",
+      "api_key": "sk-hJwUlVMp0MK70TLeahsXhvKWsp1VYHLie4lYcVqmrzBdu9qM"
+    },
+    "kimi": {
+      "type": "kimi",
+      "base_url": "https://api.kimi.com/coding/",
+      "api_key": "sk-kimi-JLyl4DPBuI6nAdjojWMJSx8Z7FUA3yIsie4ZiBnQp5qYwlu2mlvrRCknOjdOKfuz"
+    }
+  },
+  "models": {
+    "moonshot-k2": {
+      "provider": "moonshot",
+      "model": "kimi-k2-turbo-preview",
+      "max_context_size": 32000
+    },
+    "kimi-k2": {
+      "provider": "kimi",
+      "model": "kimi-k2-turbo-preview",
+      "max_context_size": 128000
+    },
+    "kimi-coding": {
+      "provider": "kimi",
+      "model": "kimi-for-coding",
+      "max_context_size": 128000
+    },
+    "kimi-k2-thinking-turbo": {
+      "provider": "kimi",
+      "model": "kimi-k2-thinking-turbo",
+      "max_context_size": 128000
+    }
+  }
+}

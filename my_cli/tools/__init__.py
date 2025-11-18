@@ -26,6 +26,11 @@ import json
 from pathlib import Path
 from typing import cast
 
+try:
+    import streamingjson
+except ImportError:
+    streamingjson = None  # Type: ignore
+
 from kosong.utils.typing import JsonType
 
 __all__ = ["SkipThisTool", "extract_key_argument"]
@@ -37,7 +42,10 @@ class SkipThisTool(Exception):
     pass
 
 
-def extract_key_argument(json_content: str, tool_name: str) -> str | None:
+def extract_key_argument(
+    json_content: "str | streamingjson.Lexer",
+    tool_name: str,
+) -> str | None:
     """
     从工具调用参数中提取关键参数 ⭐ Stage 17
 
@@ -59,13 +67,14 @@ def extract_key_argument(json_content: str, tool_name: str) -> str | None:
        - 其他工具: 完整 JSON 字符串
     3. 使用 shorten_middle() 缩短参数（最多 50 字符）
 
-    简化版实现：
-    - 不支持 streamingjson.Lexer（Stage 7-16 只支持字符串）
-    - 不使用 shorten_middle()（简化版直接返回）
-    - 只支持基础工具（Bash、ReadFile、WriteFile）
+    Stage 17+ 完整实现：
+    - ✅ 支持 streamingjson.Lexer（流式JSON解析）
+    - ✅ 支持 str（向后兼容）
+    - ✅ 和官方保持一致的逻辑
+    - ❌ 暂不使用 shorten_middle()（简化版直接返回）
 
     Args:
-        json_content: 工具调用参数的 JSON 字符串
+        json_content: 工具调用参数的 JSON 字符串或 streamingjson.Lexer
         tool_name: 工具名称
 
     Returns:
@@ -73,9 +82,14 @@ def extract_key_argument(json_content: str, tool_name: str) -> str | None:
 
     对应源码：kimi-cli-fork/src/kimi_cli/tools/__init__.py:17-82
     """
-    # 简化版（Stage 17）：只支持字符串解析
+    # Stage 17+：支持 streamingjson.Lexer（和官方保持一致）
+    if streamingjson and isinstance(json_content, streamingjson.Lexer):
+        json_str = json_content.complete_json()
+    else:
+        json_str = json_content
+
     try:
-        curr_args: JsonType = json.loads(json_content)
+        curr_args: JsonType = json.loads(json_str)
     except json.JSONDecodeError:
         return None
 
@@ -86,24 +100,32 @@ def extract_key_argument(json_content: str, tool_name: str) -> str | None:
 
     # 根据工具名称提取关键参数
     match tool_name:
-        # 命令执行工具
+        case "Task":
+            if not isinstance(curr_args, dict) or not curr_args.get("description"):
+                return None
+            key_argument = str(curr_args["description"])
+
+        case "SendDMail":
+            return "El Psy Kongroo"  # 固定文本（彩蛋）
+
+        case "Think":
+            if not isinstance(curr_args, dict) or not curr_args.get("thought"):
+                return None
+            key_argument = str(curr_args["thought"])
+
+        case "SetTodoList":
+            return None  # 不显示参数
+
         case "Bash" | "CMD":
             if not isinstance(curr_args, dict) or not curr_args.get("command"):
                 return None
             key_argument = str(curr_args["command"])
 
-        # 文件操作工具
         case "ReadFile":
             if not isinstance(curr_args, dict) or not curr_args.get("path"):
                 return None
             key_argument = _normalize_path(str(curr_args["path"]))
 
-        case "WriteFile" | "StrReplaceFile":
-            if not isinstance(curr_args, dict) or not curr_args.get("path"):
-                return None
-            key_argument = _normalize_path(str(curr_args["path"]))
-
-        # 搜索工具
         case "Glob":
             if not isinstance(curr_args, dict) or not curr_args.get("pattern"):
                 return None
@@ -114,7 +136,16 @@ def extract_key_argument(json_content: str, tool_name: str) -> str | None:
                 return None
             key_argument = str(curr_args["pattern"])
 
-        # 网络工具（Stage 17+ 扩展）
+        case "WriteFile":
+            if not isinstance(curr_args, dict) or not curr_args.get("path"):
+                return None
+            key_argument = _normalize_path(str(curr_args["path"]))
+
+        case "StrReplaceFile":
+            if not isinstance(curr_args, dict) or not curr_args.get("path"):
+                return None
+            key_argument = _normalize_path(str(curr_args["path"]))
+
         case "SearchWeb":
             if not isinstance(curr_args, dict) or not curr_args.get("query"):
                 return None
@@ -125,30 +156,17 @@ def extract_key_argument(json_content: str, tool_name: str) -> str | None:
                 return None
             key_argument = str(curr_args["url"])
 
-        # 高级工具（Stage 17+ 扩展）
-        case "Task":
-            if not isinstance(curr_args, dict) or not curr_args.get("description"):
-                return None
-            key_argument = str(curr_args["description"])
-
-        case "Think":
-            if not isinstance(curr_args, dict) or not curr_args.get("thought"):
-                return None
-            key_argument = str(curr_args["thought"])
-
-        case "SendDMail":
-            return "El Psy Kongroo"  # 固定文本（彩蛋）
-
-        case "SetTodoList":
-            return None  # 不显示参数
-
-        # 默认：返回完整 JSON 字符串
         case _:
-            key_argument = json_content
+            # 默认：返回完整 JSON 字符串
+            if streamingjson and isinstance(json_content, streamingjson.Lexer):
+                # 从 streamingjson.Lexer 获取累积的字符串
+                content: list[str] = cast(list[str], json_content.json_content)
+                key_argument = "".join(content)
+            else:
+                key_argument = json_str
 
-    # 简化版：不使用 shorten_middle()（官方会缩短到 50 字符）
-    # 如果需要缩短，可以添加：
-    # from kimi_cli.utils.string import shorten_middle
+    # 简化版：暂不使用 shorten_middle()（官方会缩短到 50 字符）
+    # 如果需要缩短，可以实现 shorten_middle 函数
     # key_argument = shorten_middle(key_argument, width=50)
 
     return key_argument

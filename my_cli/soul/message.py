@@ -18,9 +18,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from kosong.message import ContentPart, Message, TextPart
+from kosong.message import ContentPart, ImageURLPart, Message, TextPart, ThinkPart
 from kosong.tooling import ToolError, ToolOk, ToolResult
 from kosong.tooling.error import ToolRuntimeError
+
+from my_cli.llm import ModelCapability
 
 
 def system(message: str) -> ContentPart:
@@ -168,25 +170,69 @@ def _output_to_content_parts(
 
 
 # ============================================================
+# Stage 17 收尾：check_message() 函数实现 ⭐
+# ============================================================
+# 官方参考：kimi-cli-fork/src/kimi_cli/soul/message.py:63-75
+# 对应源码：check_message()
+
+
+def check_message(
+    message: Message, model_capabilities: set[ModelCapability] | None
+) -> set[ModelCapability]:
+    """
+    检查消息内容需要的模型能力 ⭐ Stage 17 完整实现
+
+    这个函数用于在发送消息给 LLM 前检查该消息是否包含 LLM 不支持的内容。
+    如果 LLM 不支持某些能力，会抛出 LLMNotSupported 异常。
+
+    官方实现要点：
+    1. 遍历消息中的所有 ContentPart
+    2. 如果包含 ImageURLPart，需要 "image_in" 能力
+    3. 如果包含 ThinkPart，需要 "thinking" 能力
+    4. 返回消息需要但 LLM 没有的能力集合
+
+    Args:
+        message: 要检查的消息
+        model_capabilities: LLM 支持的能力集合（可能为 None）
+
+    Returns:
+        set[ModelCapability]: LLM 缺失的能力集合（空集合表示支持）
+
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/message.py:63-75
+    """
+    # ⭐ Stage 17 完整实现（官方做法）
+    # 如果没有能力信息，返回空集合（所有都支持）
+    if model_capabilities is None:
+        return set()
+
+    # 初始化缺失能力集合
+    missing_caps: set[ModelCapability] = set()
+
+    # 遍历消息中的所有内容片段
+    if isinstance(message.content, str):
+        # 纯文本不需要特殊能力
+        return set()
+
+    for part in message.content:
+        # 检查是否包含图片内容
+        if isinstance(part, ImageURLPart) and ModelCapability("image_in") not in model_capabilities:
+            missing_caps.add(ModelCapability("image_in"))
+
+        # 检查是否包含思考内容
+        if isinstance(part, ThinkPart) and ModelCapability("thinking") not in model_capabilities:
+            missing_caps.add(ModelCapability("thinking"))
+
+    return missing_caps
+
+
+# ============================================================
 # TODO: Stage 18+ 完整功能（参考官方）
 # ============================================================
 # 官方参考：kimi-cli-fork/src/kimi_cli/soul/message.py
 #
 # Stage 18+（图片支持）需要添加：
 #
-# from kosong.message import ImageURLPart, ThinkPart
-# from kimi_cli.llm import ModelCapability
-#
-# def check_message(message: Message, capabilities: set[ModelCapability] | None) -> set[ModelCapability]:
-#     """检查消息是否包含 LLM 不支持的能力"""
-#     if capabilities is None:
-#         return set()
-#
-#     missing_caps: set[ModelCapability] = set()
-#     for part in message.content:
-#         if isinstance(part, ImageURLPart) and ModelCapability.IMAGE_IN not in capabilities:
-#             missing_caps.add(ModelCapability.IMAGE_IN)
-#         if isinstance(part, ThinkPart) and ModelCapability.THINKING not in capabilities:
-#             missing_caps.add(ModelCapability.THINKING)
-#     return missing_caps
+# - ImageURLPart 和 ThinkPart 的完整支持（✅ 已完成）
+# - ModelCapability 检查机制（✅ 已完成）
+# - LLMNotSupported 异常处理（在异常模块中）
 # ============================================================

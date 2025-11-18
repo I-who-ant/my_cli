@@ -71,7 +71,14 @@ def test_kimisoul_implementation():
         def model_name(self) -> str:
             return "mock-model-v1"
 
-    runtime = Runtime(chat_provider=MockChatProvider(), max_steps=10)
+    # ⭐ Stage 17：使用 LLM 替代 ChatProvider
+    from my_cli.llm import LLM
+    llm = LLM(
+        chat_provider=MockChatProvider(),
+        max_context_size=32000,
+        capabilities={"thinking"}
+    )
+    runtime = Runtime(llm=llm, max_steps=10)
 
     # 创建一个简单的 MockToolset
     class MockToolset:

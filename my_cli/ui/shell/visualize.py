@@ -35,7 +35,7 @@ import json
 
 # ⭐ Stage 12：导入 utils.rich 应用全局配置（字符级换行）
 import my_cli.utils.rich  # noqa: F401
-from kosong.message import ContentPart, TextPart, ToolCall
+from kosong.message import ContentPart, TextPart, ToolCall, ToolCallPart
 from kosong.tooling import ToolError, ToolOk, ToolResult
 from rich.console import Group
 from rich.live import Live
@@ -50,7 +50,7 @@ __all__ = ["visualize"]
 
 async def visualize(wire_ui: WireUISide) -> None:
     """
-    UI Loop 函数 - 从 Wire 接收消息并渲染 ⭐ Stage 12 Live 修复版
+    UI Loop 函数 - 从 Wire 接收消息并渲染 ⭐ Stage 17 集成 extract_key_argument
 
     这是核心的渲染函数，负责：
     1. 循环接收 Wire 消息
@@ -58,6 +58,7 @@ async def visualize(wire_ui: WireUISide) -> None:
     3. 支持流式输出（逐字显示）
     4. 显示工具调用和结果
     5. ⭐ 使用 rich.live.Live 创建独立渲染区域
+    6. ⭐ 支持 ToolCallPart 流式参数增量更新
 
     Args:
         wire_ui: Wire 的 UI 侧接口
@@ -73,9 +74,17 @@ async def visualize(wire_ui: WireUISide) -> None:
         2. 每次收到消息时，更新 content_text
         3. live.update() 刷新 Live 区域显示
         4. 输入区域完全独立，不受影响
+
+    Stage 17 新增：
+        - 支持 ToolCallPart 累积参数增量
+        - 使用 _ToolCallManager 管理活跃的工具调用
+        - 实时更新工具参数显示
     """
     # 累积的文本内容
     content_text = Text()
+
+    # ⭐ Stage 17：工具调用管理器（累积 ToolCallPart 增量）
+    tool_call_manager = _ToolCallManager(content_text, live=None)
 
     # ⭐ 使用 Live 创建独立渲染区域
     with Live(
@@ -84,6 +93,9 @@ async def visualize(wire_ui: WireUISide) -> None:
         refresh_per_second=10,  # 每秒刷新 10 次
         transient=False,  # 内容不是临时的，结束后保留
     ) as live:
+        # 传递 live 实例给管理器
+        tool_call_manager._live = live
+
         while True:
             msg = await wire_ui.receive()
 
@@ -104,13 +116,17 @@ async def visualize(wire_ui: WireUISide) -> None:
                     content_text.append(f"\n\n🔄 [Step {msg.n}]\n", style="cyan")
                     live.update(content_text)
 
-            # 工具调用：显示工具名称和参数
+            # ⭐ Stage 17：工具调用（支持 ToolCallPart 增量）
             elif isinstance(msg, ToolCall):
-                _render_tool_call_to_text(msg, content_text)
-                live.update(content_text)
+                tool_call_manager.start_tool_call(msg)
+
+            # ⭐ Stage 17：工具调用增量参数更新
+            elif isinstance(msg, ToolCallPart):
+                tool_call_manager.append_args_part(msg)
 
             # 工具结果：显示成功/失败状态
             elif isinstance(msg, ToolResult):
+                tool_call_manager.finish_tool_call(msg)
                 _render_tool_result_to_text(msg, content_text)
                 live.update(content_text)
 
@@ -119,38 +135,9 @@ async def visualize(wire_ui: WireUISide) -> None:
                 break
 
 
-def _render_tool_call_to_text(tool_call: ToolCall, text: Text) -> None:
-    """
-    渲染工具调用到 Text 对象 ⭐ Stage 12 Live 修复版
-
-    将工具调用信息追加到 Text 对象，而不是直接 console.print()。
-    这样才能保证 Live 区域的完全隔离。
-
-    Args:
-        tool_call: 工具调用对象
-        text: 累积的 Text 对象
-    """
-    # 添加工具调用标题
-    text.append("\n\n🔧 调用工具: ", style="yellow")
-    text.append(tool_call.function.name, style="yellow")
-    text.append("\n")
-
-    # 格式化参数
-    try:
-        arguments = (
-            json.loads(tool_call.function.arguments)
-            if tool_call.function.arguments
-            else {}
-        )
-        args_str = json.dumps(arguments, ensure_ascii=False, indent=2)
-        text.append(f"   参数:\n{args_str}\n", style="grey50")
-    except Exception:
-        text.append(f"   参数: {tool_call.function.arguments}\n", style="grey50")
-
-
 def _render_tool_result_to_text(tool_result: ToolResult, text: Text) -> None:
     """
-    渲染工具执行结果到 Text 对象 ⭐ Stage 12 Live 修复版
+    渲染工具执行结果到 Text 对象 ⭐ Stage 17 更新 extract_key_argument
 
     将工具执行结果追加到 Text 对象，而不是直接 console.print()。
     这样才能保证 Live 区域的完全隔离。
@@ -178,3 +165,88 @@ def _render_tool_result_to_text(tool_result: ToolResult, text: Text) -> None:
 
         if tool_result.result.message:
             text.append(f"   错误: {tool_result.result.message}\n", style="grey50")
+
+
+# ⭐ Stage 17：工具调用管理器（仿官方 _ToolCallBlock 的简化版）
+class _ToolCallManager:
+    """
+    管理工具调用的流式更新（累积 ToolCallPart 增量）
+
+    工作原理：
+    1. 接收 ToolCall 后，显示工具名称
+    2. 累积 ToolCallPart 的 arguments_part 增量
+    3. 每次收到增量后，重新提取关键参数并更新显示
+    4. ToolResult 到达后完成显示
+
+    参考：kimi-cli-fork/src/kimi_cli/ui/shell/visualize.py:_ToolCallBlock
+    """
+
+    def __init__(self, text: Text, live):
+        self._text = text
+        self._live = live
+
+        # 当前活跃的工具调用
+        self._current_tool_call: ToolCall | None = None
+        self._current_arguments: str = ""
+
+    def start_tool_call(self, tool_call: ToolCall):
+        """开始显示工具调用"""
+        self._current_tool_call = tool_call
+        self._current_arguments = tool_call.function.arguments or ""
+
+        # 显示工具调用标题
+        self._text.append("\n\n🔧 调用工具: ", style="yellow")
+        self._text.append(tool_call.function.name, style="yellow")
+        self._text.append("\n")
+
+        # 立即尝试显示参数（如果有的话）
+        self._update_arguments_display()
+
+    def append_args_part(self, tool_call_part: ToolCallPart):
+        """接收参数增量并更新显示"""
+        if not self._current_tool_call:
+            return
+
+        # 累积参数增量
+        if tool_call_part.arguments_part:
+            self._current_arguments += tool_call_part.arguments_part
+
+        # 更新显示
+        self._update_arguments_display()
+
+    def finish_tool_call(self, tool_result: ToolResult):
+        """工具调用完成清理"""
+        self._current_tool_call = None
+        self._current_arguments = ""
+
+    def _update_arguments_display(self):
+        """更新参数显示"""
+        if not self._current_tool_call:
+            return
+
+        from my_cli.tools import extract_key_argument
+
+        # 提取关键参数
+        key_arg = extract_key_argument(self._current_arguments, self._current_tool_call.function.name)
+
+        if key_arg:
+            # 显示关键参数（简洁版）
+            self._text.append(f"   参数: {key_arg}\n", style="grey50")
+        else:
+            # 如果没有关键参数，尝试显示完整 JSON（但可能不完整）
+            try:
+                if self._current_arguments.strip():
+                    arguments = json.loads(self._current_arguments)
+                    args_str = json.dumps(arguments, ensure_ascii=False, indent=2)
+                    self._text.append(f"   参数:\n{args_str}\n", style="grey50")
+                else:
+                    self._text.append(f"   参数:\n{{}}\n", style="grey50")
+            except json.JSONDecodeError:
+                # JSON 还没完整，先显示原始内容
+                self._text.append(f"   参数: {self._current_arguments}", style="grey50")
+                # 添加换行为下一个增量做准备
+                self._text.append("\n", style="grey50")
+
+        # 刷新显示
+        if self._live:
+            self._live.update(self._text)
