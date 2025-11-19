@@ -36,7 +36,7 @@ from pathlib import Path
 from kosong.chat_provider import ChatProviderError
 from rich.panel import Panel
 
-from my_cli.soul import LLMNotSet, RunCancelled, create_soul, run_soul
+from my_cli.soul import LLMNotSet, RunCancelled, run_soul
 from my_cli.ui.shell.console import console
 from my_cli.ui.shell.metacmd import get_meta_command
 from my_cli.ui.shell.prompt import CustomPromptSession, UserInput
@@ -62,21 +62,22 @@ class ShellApp:
     - Stage 11：模块化重构（按官方架构分层）✅
     """
 
-    def __init__(self, verbose: bool = False, work_dir: Path | None = None):
+    def __init__(self, soul, welcome_info: list | None = None):
         """
-        初始化 ShellApp
+        初始化 ShellApp ⭐ Stage 18 修复为官方签名
 
         Args:
-            verbose: 是否显示详细日志
-            work_dir: 工作目录（默认当前目录）
+            soul: Soul 实例（由 MyCLI.create() 创建）
+            welcome_info: 欢迎信息列表（可选，Stage 19+ 支持）
+
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:32-42
         """
-        self.verbose = verbose
-        self.work_dir = work_dir or Path.cwd()
-        self.soul = None  # Soul 实例（在 run() 中创建）
+        self.soul = soul
+        self.welcome_info = welcome_info or []  # TODO: Stage 19+ 显示欢迎信息
 
     async def run(self, command: str | None = None) -> bool:
         """
-        运行 Shell App
+        运行 Shell App ⭐ Stage 18 修复
 
         支持两种模式：
         1. 单命令模式（command 不为 None）：执行一次后退出
@@ -87,20 +88,11 @@ class ShellApp:
 
         Returns:
             是否成功执行
-        """
-        # 1. 创建 Soul（只创建一次，复用于所有对话）⭐
-        try:
-            self.soul = create_soul(work_dir=self.work_dir)
-        except FileNotFoundError as e:
-            console.print(f"\n[red]❌ 配置文件错误: {e}[/red]\n")
-            console.print("请先运行 'mycli init' 创建配置文件")
-            return False
-        except ValueError as e:
-            console.print(f"\n[red]❌ 配置错误: {e}[/red]\n")
-            return False
 
-        if self.verbose:
-            console.print(f"\n[cyan]🤖 使用模型: {self.soul.model_name}[/cyan]\n")
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:36-93
+        """
+        # soul 已经在 __init__ 中传入，不需要再创建！
+        # (soul 由 MyCLI.create() 创建并传入)
 
         # ============================================================
         # 模式 1：单命令模式
@@ -115,11 +107,11 @@ class ShellApp:
         # 2. 显示欢迎信息
         _print_welcome_info(self.soul.name, self.soul.model_name)
 
-        # 3. 创建 CustomPromptSession（模块化）⭐ Stage 16: 传递 status_provider
+        # 3. 创建 CustomPromptSession（模块化）⭐ Stage 19.1: 对齐官方签名
         with CustomPromptSession(
-            work_dir=self.work_dir,
             status_provider=lambda: self.soul.status,  # ⭐ Stage 16: 动态状态回调
-            model_capabilities=self.soul.model_capabilities,  # ⭐ Stage 16: 模型能力
+            model_capabilities=self.soul.model_capabilities or set(),  # ⭐ Stage 16: 模型能力
+            initial_thinking=self.soul.thinking,  # ⭐ Stage 19.1: 初始 thinking 模式
         ) as prompt_session:
             # 4. 进入输入循环
             while True:
@@ -157,27 +149,19 @@ class ShellApp:
                 except Exception as e:
                     # 其他错误：打印错误但继续循环
                     console.print(f"\n[red]❌ 未知错误: {e}[/red]\n")
-                    if self.verbose:
-                        import traceback
-
-                        traceback.print_exc()
+                    # TODO: Stage 19+ 添加 verbose 模式支持
+                    import traceback
+                    traceback.print_exc()
                     continue
 
         return True
 
     async def _run_single_command(self, command: str) -> bool:
-        """单命令模式：执行一次命令后退出"""
-        if self.verbose:
-            console.print(f"[grey50]📝 用户输入: {command}[/grey50]\n")
-
+        """单命令模式：执行一次命令后退出 ⭐ Stage 18 修复"""
         console.print("\n[bold cyan]💬 AI 回复:[/bold cyan]\n")
         try:
             await self._run_soul_command(command)
             console.print("\n")
-
-            if self.verbose:
-                console.print(f"\n[green]✅ 对话轮次: {self.soul.message_count}[/green]")
-
             return True
 
         except Exception as e:
@@ -214,10 +198,9 @@ class ShellApp:
                 await result
         except Exception as e:
             console.print(f"[red]❌ 命令执行失败: {e}[/red]")
-            if self.verbose:
-                import traceback
-
-                traceback.print_exc()
+            # TODO: Stage 19+ 添加 verbose 模式支持
+            import traceback
+            traceback.print_exc()
 
     async def _run_soul_command(self, user_input: str) -> None:
         """
@@ -250,10 +233,9 @@ class ShellApp:
             pass
         except Exception as e:
             console.print(f"\n[red]❌ 未知错误: {e}[/red]\n")
-            if self.verbose:
-                import traceback
-
-                traceback.print_exc()
+            # TODO: Stage 19+ 添加 verbose 模式支持
+            import traceback
+            traceback.print_exc()
 
 
 def _print_welcome_info(name: str, model: str) -> None:
@@ -325,3 +307,9 @@ def _print_welcome_info(name: str, model: str) -> None:
 #    - Kimi Soul 专属命令
 #    - 帮助系统自动生成
 # ============================================================
+
+# ============================================================
+# Stage 19.2：导入 setup 模块（注册 /setup 元命令）⭐
+# ============================================================
+from my_cli.ui.shell import setup  # noqa: F401
+

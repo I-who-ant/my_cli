@@ -59,7 +59,7 @@ all = [
 
 # 命令行入口
 [project.scripts]
-my_cli = "my_cli.cli:my_cli"
+my_cli = "my_cli.cli:cli"
 
 [project.urls]
 Homepage = "https://github.com/I-who-ant/my_cli"

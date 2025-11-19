@@ -37,16 +37,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
+from functools import partial
 from pathlib import Path
 
 from kosong.chat_provider import ChatProviderError
-from kosong.message import ContentPart, TextPart, ToolCall, ToolCallPart
-from kosong.tooling import ToolResult, ToolError, ToolOk
 
+from my_cli.cli import OutputFormat
 from my_cli.soul import LLMNotSet, RunCancelled, create_soul, run_soul
-from my_cli.wire import WireUISide
-from my_cli.wire.message import StepBegin, StepInterrupted
+from my_cli.ui.print.visualize import visualize
 
 __all__ = ["PrintUI"]
 
@@ -118,13 +116,13 @@ class PrintUI:
         # 3. 创建取消事件（用于 Ctrl+C）
         cancel_event = asyncio.Event()
 
-        # 4. 调用 run_soul() 连接 Soul 和 UI Loop
+        # 4. 调用 run_soul() 连接 Soul 和 UI Loop（⭐ 官方架构）
         print("\n💬 AI 回复:\n")
         try:
             await run_soul(
                 soul=soul,
                 user_input=command,
-                ui_loop_fn=self._ui_loop,  # UI Loop 函数
+                ui_loop_fn=partial(visualize, "text"),  # ⭐ 官方做法：visualize 就是 UI loop 函数！
                 cancel_event=cancel_event,
             )
 
@@ -142,147 +140,6 @@ class PrintUI:
         except Exception as e:
             print(f"\n❌ 未知错误: {e}\n")
             raise
-
-    async def _ui_loop(self, wire_ui: WireUISide) -> None:
-        """
-        UI Loop 函数 - 从 Wire 接收消息并打印（⭐ Stage 17 支持 ToolCallPart）
-
-        这是 Wire 机制的关键部分！
-        UI Loop 不断从 Wire 接收消息，直到收到 StepInterrupted 为止。
-
-        流程：
-        1. 循环接收 Wire 消息
-        2. 根据消息类型渲染输出：
-           - TextPart: 打印文本（flush=True 实现逐字输出）
-           - ContentPart: 打印内容片段
-           - StepBegin: 显示步骤编号 ⭐ Stage 8
-           - ToolCall: 显示工具调用信息 ⭐ Stage 8
-           - ToolCallPart: 累积参数增量 ⭐ Stage 17
-           - ToolResult: 显示工具执行结果 ⭐ Stage 8
-           - StepInterrupted: 退出循环
-
-        Args:
-            wire_ui: Wire 的 UI 侧接口
-
-        对应源码：kimi-cli-fork/src/kimi_cli/ui/print/__init__.py:129-134
-        """
-        # ⭐ Stage 17：工具调用管理器（简化版）
-        _current_tool_call = None
-        _current_arguments = ""
-
-        # ⭐ 关键：循环接收 Wire 消息
-        while True:
-            # 接收一条消息（异步等待）
-            msg = await wire_ui.receive()
-
-            # ============================================================
-            # Stage 6：基础消息处理 ✅
-            # ============================================================
-            if isinstance(msg, TextPart):
-                # 文本片段：实时打印（逐字输出效果）
-                if msg.text:
-                    print(msg.text, end="", flush=True)
-
-            elif isinstance(msg, ContentPart):
-                # 内容片段（可能包含图片、文件等）
-                # Stage 6 简化版：只处理文本
-                if hasattr(msg, "text") and msg.text:
-                    print(msg.text, end="", flush=True)
-
-            # ============================================================
-            # Stage 8：工具调用显示 ⭐
-            # ============================================================
-            elif isinstance(msg, StepBegin):
-                # 步骤开始：显示步骤编号
-                if msg.n > 1:  # 第一步不显示（避免干扰）
-                    print(f"\n\n🔄 [Step {msg.n}]", flush=True)
-
-            elif isinstance(msg, ToolCall):
-                # 工具调用：显示工具名称
-                print(f"\n\n🔧 调用工具: {msg.function.name}", flush=True)
-
-                # ⭐ Stage 17：累积参数
-                _current_tool_call = msg
-                _current_arguments = msg.function.arguments or ""
-
-                # 立即尝试显示参数（如果有完整 JSON 的话）
-                from my_cli.tools import extract_key_argument
-
-                key_arg = extract_key_argument(_current_arguments, msg.function.name)
-
-                if key_arg:
-                    print(f"   参数: {key_arg}", flush=True)
-                else:
-                    # JSON 可能还没完整，先尝试显示
-                    try:
-                        if _current_arguments.strip():
-                            arguments = json.loads(_current_arguments)
-                            args_str = json.dumps(arguments, ensure_ascii=False, indent=2)
-                            print(f"   参数:\n{args_str}", flush=True)
-                        else:
-                            print(f"   参数:", flush=True)
-                    except json.JSONDecodeError:
-                        # JSON 还没完整，先显示部分内容
-                        print(f"   参数: {_current_arguments}", flush=True)
-
-            # ⭐ Stage 17：工具调用增量参数更新
-            elif isinstance(msg, ToolCallPart):
-                if _current_tool_call and msg.arguments_part:
-                    _current_arguments += msg.arguments_part
-
-                    # 重新提取关键参数
-                    from my_cli.tools import extract_key_argument
-
-                    key_arg = extract_key_argument(_current_arguments, _current_tool_call.function.name)
-
-                    if key_arg:
-                        # 清除旧的参数显示并重新打印
-                        print(f"\r   参数: {key_arg}", end="", flush=True)
-                        print("", flush=True)  # 换行
-                    else:
-                        # 尝试重新解析完整 JSON
-                        try:
-                            if _current_arguments.strip():
-                                arguments = json.loads(_current_arguments)
-                                args_str = json.dumps(arguments, ensure_ascii=False, indent=2)
-                                # 清除旧内容并重新打印
-                                print(f"\r   参数:\n{args_str}", flush=True)
-                        except json.JSONDecodeError:
-                            # 还没完整，继续累积
-                            pass
-
-            elif isinstance(msg, ToolResult):
-                # 工具结果：显示成功/失败状态
-                if isinstance(msg.result, ToolOk):
-                    print(f"\n✅ 工具成功", flush=True)
-                    if msg.result.brief:
-                        print(f"   {msg.result.brief}", flush=True)
-                    # 显示输出（截断显示，避免过长）
-                    output = str(msg.result.output)
-                    if len(output) > 500:
-                        output = output[:500] + "...(截断)"
-                    if output.strip():
-                        print(f"   输出: {output}", flush=True)
-                elif isinstance(msg.result, ToolError):
-                    print(f"\n❌ 工具失败: {msg.result.brief}", flush=True)
-                    if msg.result.message:
-                        print(f"   错误: {msg.result.message}", flush=True)
-
-                # 清理当前工具调用状态
-                _current_tool_call = None
-                _current_arguments = ""
-
-            # ============================================================
-            # Stage 6：控制流消息 ✅
-            # ============================================================
-            elif isinstance(msg, StepInterrupted):
-                # 步骤中断：退出 UI Loop
-                break
-
-            # 其他消息类型（Stage 8 暂时忽略）
-            # Stage 9+ 需要处理：
-            # - StatusUpdate: 状态更新
-            # - CompactionBegin/End: Context 压缩
 
 
 # ============================================================

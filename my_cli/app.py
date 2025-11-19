@@ -1,315 +1,246 @@
 """
-阶段 2：应用层框架
+App - 应用层框架
 
 学习目标：
-1. 创建应用类（MyCLI）
-2. 实现配置管理
+1. 理解应用类的职责（协调 Session、Runtime、Soul）
+2. 理解配置管理
 3. 理解依赖注入模式
 
-对应源码：kimi-cli-main/src/kimi_cli/app.py (265 行)
+对应源码：kimi-cli-fork/src/kimi_cli/app.py
 
 阶段演进：
 - Stage 2-3：基础应用框架 ✅
-  * MyCLI 类定义
-  * 工作目录管理
-  * run_print_mode() / run_shell_mode() 入口
-
 - Stage 4-5：Soul 引擎集成 ✅
-  * 集成 create_soul() 工厂函数
-  * 移除模拟模式（官方没有这个概念）
-  * 直接调用真实 LLM API
-
-- Stage 6：完整应用层（待实现）
-  * Session 管理（会话持久化）
-  * Config 管理（配置加载）
-  * 异步 create() 工厂方法
-  * 支持多种 UI 模式（shell/print/acp/wire）
-
-- Stage 7+：高级特性（待实现）
-  * MCP 工具配置
-  * Approval 系统
-  * Thinking 模式
+- Stage 18：Session 管理集成 ⭐ 完整实现
+- Stage 18+：完整应用层
 """
 
+from __future__ import annotations
+
+import contextlib
+import os
+import warnings
+from collections.abc import Generator
 from pathlib import Path
+from typing import Any
+
+from pydantic import SecretStr
+
+from my_cli.agentspec import DEFAULT_AGENT_FILE
+from my_cli.config import LLMModel, LLMProvider, load_config
+from my_cli.llm import augment_provider_with_env_vars, create_llm
+from my_cli.session import Session
+from my_cli.share import get_share_dir
+from my_cli.soul import LLMNotSet, LLMNotSupported
+from my_cli.soul.context import Context
+from my_cli.soul.kimisoul import KimiSoul
+from my_cli.soul.runtime import Runtime
+from my_cli.utils.logging import StreamToLogger, logger
+from my_cli.utils.path import shorten_home
+
+
+def enable_logging(debug: bool = False) -> None:
+    """启用日志系统 ⭐ Stage 18
+
+    Args:
+        debug: 是否启用调试模式
+
+    对应源码：kimi-cli-fork/src/kimi_cli/app.py:27-36
+    """
+    if debug:
+        logger.enable("kosong")
+    logger.add(
+        get_share_dir() / "logs" / "kimi.log",
+        level="TRACE" if debug else "INFO",
+        rotation="06:00",
+        retention="10 days",
+    )
 
 
 class MyCLI:
-    """My CLI 应用类 - 管理应用的核心状态和配置.
+    """My CLI 应用类 ⭐ Stage 18 完整实现
 
-    这是一个简化版的应用层，负责：
-    1. 管理工作目录
-    2. 存储用户配置
-    3. 提供统一的 UI 入口
+    职责：
+    - 管理 Session（会话持久化）
+    - 协调 Runtime（运行时）
+    - 管理 KimiSoul（AI 引擎）
+    - 提供 UI 入口点
 
-    阶段演进：
-    - Stage 2-3：基础框架 ✅
-    - Stage 4-5：Soul 集成 ✅
-    - Stage 6+：完整应用层（Session/Config/多UI模式）
+    对应源码：kimi-cli-fork/src/kimi_cli/app.py:39-116
     """
-
-    def __init__(
-        self,
-        work_dir: Path,
-        verbose: bool = False,
-    ) -> None:
-        """初始化 MyCLI 实例.
-
-        Args:
-            work_dir: 工作目录
-            verbose: 是否开启详细输出
-        """
-        self.work_dir = work_dir
-        self.verbose = verbose
 
     @staticmethod
     async def create(
-        work_dir: Path,
-        verbose: bool = False,
+        session: Session,
+        *,
+        yolo: bool = False,
+        mcp_configs: list[dict[str, Any]] | None = None,
+        config_file: Path | None = None,
+        model_name: str | None = None,
+        thinking: bool = False,
+        agent_file: Path | None = None,
     ) -> "MyCLI":
-        """异步工厂方法 - 创建 MyCLI 实例.
+        """
+        创建 MyCLI 实例 ⭐ Stage 18 完整实现
 
-        为什么使用工厂方法而不是 __init__？
-        - __init__ 不能是异步的
-        - create 可以执行异步初始化任务（如加载配置、连接 LLM）
-
-        对应源码：kimi-cli-main/src/kimi_cli/app.py:24
-
-        Stage 2-5 实现：
-        - 验证工作目录
-        - 创建应用实例
-
-        Stage 6+ 补充：
-        - 加载配置文件
-        - 创建 Session
-        - ��建 LLM 客户端
-        - 加载 Agent 规范
-        - 初始化 MCP 工具
-        - 创建 Soul 引擎
+        这是应用的主要工厂方法，负责：
+        1. 加载配置
+        2. 创建 LLM 客户端
+        3. 创建 Runtime
+        4. 加载 Agent 规范
+        5. 创建并恢复 Context
+        6. 创建 KimiSoul
 
         Args:
-            work_dir: 工作目录
-            verbose: 是否开启详细输出
+            session: Session 实例（通过 Session.create() 或 Session.continue_() 创建）
+            yolo: 是否自动批准所有操作（无确认模式）
+            mcp_configs: MCP 工具配置列表
+            config_file: 配置文件路径
+            model_name: 模型名称
+            thinking: 是否启用思考模式
+            agent_file: Agent 规范文件路径
 
         Returns:
-            MyCLI 实例
+            MyCLI: 应用实例
 
         Raises:
-            FileNotFoundError: 工作目录不存在
-        """
-        # 验证工作目录是否存在
-        if not work_dir.exists():
-            raise FileNotFoundError(f"工作目录不存在: {work_dir}")
+            FileNotFoundError: Agent 文件不存在
+            ConfigError: 配置无效
+            AgentSpecError: Agent 规范无效
 
-        # 创建实例
-        instance = MyCLI(
-            work_dir=work_dir,
-            verbose=verbose,
+        对应源码：kimi-cli-fork/src/kimi_cli/app.py:40-116
+        """
+        # 1. 加载配置
+        config = load_config(config_file)
+        logger.info("Loaded config: {config}", config=config)
+
+        model: LLMModel | None = None
+        provider: LLMProvider | None = None
+
+        # 尝试使用配置文件中的设置
+        if not model_name and config.default_model:
+            # 未指定 --model && 配置中有默认模型
+            model = config.models[config.default_model]
+            provider = config.providers[model.provider]
+        if model_name and model_name in config.models:
+            # 指定了 --model && 模型在配置中
+            model = config.models[model_name]
+            provider = config.providers[model.provider]
+
+        if not model:
+            # 使用默认的空配置（将抛出 LLMNotSet 异常）
+            model = LLMModel(provider="", model="", max_context_size=100_000)
+            provider = LLMProvider(type="kimi", base_url="", api_key=SecretStr(""))
+
+        # 2. 环境变量覆盖
+        assert provider is not None
+        assert model is not None
+        env_overrides = augment_provider_with_env_vars(provider, model)
+
+        # 3. 创建 LLM 客户端
+        if not provider.base_url or not model.model:
+            llm = None
+        else:
+            logger.info("Using LLM provider: {provider}", provider=provider)
+            logger.info("Using LLM model: {model}", model=model)
+            llm = create_llm(provider, model, session_id=session.id)
+
+        # 4. 创建 Runtime
+        runtime = await Runtime.create(config, llm, session, yolo)
+
+        # 5. 加载 Agent 规范
+        # TODO: Stage 18+ 实现完整的 load_agent 函数
+        # if agent_file is None:
+        #     agent_file = DEFAULT_AGENT_FILE
+        # from my_cli.soul.agent import load_agent
+        # agent = await load_agent(agent_file, runtime, mcp_configs=mcp_configs or [])
+        # 临时使用简化实现
+        from my_cli.soul.agent import Agent
+        agent = Agent(
+            name="MyCLI Assistant",
+            work_dir=runtime.session.work_dir,
         )
 
-        if verbose:
-            print(f"[应用层] MyCLI 实例创建成功")
-            print(f"[应用层] 工作目录: {work_dir}")
+        # 6. 创建并恢复 Context
+        context = Context(session.history_file)
+        await context.restore()
 
-        return instance
-
-        # ============================================================
-        # TODO: Stage 6+ 完整实现（参考官方）
-        # ============================================================
-        # ��方参考：kimi-cli-fork/src/kimi_cli/app.py:26-121
-        #
-        # @staticmethod
-        # async def create(
-        #     work_dir: Path,
-        #     verbose: bool = False,
-        #     session: Session | None = None,  # Stage 6+
-        #     config_file: Path | None = None,  # Stage 6+
-        #     model_name: str | None = None,    # Stage 6+
-        #     yolo: bool = False,               # Stage 8+
-        #     thinking: bool = False,           # Stage 8+
-        #     mcp_configs: list[dict] | None = None,  # Stage 7+
-        #     agent_file: Path | None = None,   # Stage 7+
-        # ) -> "MyCLI":
-        #     """创建 MyCLI 实例（完整版）"""
-        #
-        #     # 1. 创建或恢复 Session
-        #     if session is None:
-        #         session = Session.create(work_dir) or Session.continue_(work_dir)
-        #
-        #     # 2. 加载配置文件
-        #     config = load_config(config_file)
-        #
-        #     # 3. 创建 Soul 引擎
-        #     soul = await create_soul(
-        #         work_dir=work_dir,
-        #         model_name=model_name,
-        #         config_file=config_file,
-        #         session=session,
-        #         yolo=yolo,
-        #         thinking=thinking,
-        #         mcp_configs=mcp_configs,
-        #     )
-        #
-        #     # 4. 创建应用实例
-        #     instance = MyCLI(
-        #         work_dir=work_dir,
-        #         verbose=verbose,
-        #         soul=soul,
-        #         session=session,
-        #     )
-        #
-        #     return instance
-        # ============================================================
-
-    async def run_print_mode(
-        self,
-        command: str | None,
-    ) -> None:
-        """运行 Print UI 模式.
-
-        Print 模式是最简单的 UI：
-        - 从标准输入读取命令
-        - 输出到标准输出
-        - 适合批处理和脚本集成
-
-        对应源码：kimi-cli-main/src/kimi_cli/app.py:167
-
-        Stage 2-3 实现：
-        - 创建 PrintUI 实例（模拟模式）
-
-        Stage 4-5 实现：✅
-        - 创建 PrintUI 实例（真实 LLM）
-        - 通过 create_soul() 创建 Soul 引擎
-        - 调用 soul.run() 获取 LLM 响应
-
-        Stage 6+ 实现：
-        - 使用 PrintApp（官方实现）
-        - 集成 Wire 机制
-        - 支持 input_format (text/stream-json)
-        - 支持 output_format (text/stream-json)
-
-        Args:
-            command: 用户命令（如果为 None，则从标准输入读取）
-        """
-        # 导入 UI 模块（延迟导入，避免循环依赖）
-        from my_cli.ui.print import PrintUI
-
-        if self.verbose:
-            print("[应用层] 启动 Print UI 模式")
-
-        # ============================================================
-        # Stage 4-5：直接使用真实 LLM ✅
-        # ============================================================
-        # 不再需要 use_real_llm 参数！
-        # 官方代码逻辑：
-        # - 有配置 → 调用真实 LLM
-        # - 无配置 → 抛出 LLMNotSet 异常
-        ui = PrintUI(
-            verbose=self.verbose,
-            work_dir=self.work_dir,
+        # 7. 创建 KimiSoul
+        soul = KimiSoul(
+            agent,
+            runtime,
+            context=context,
         )
-
-        # 运行 UI
-        await ui.run(command)
-
-        # ============================================================
-        # TODO: Stage 6+ 使用官方 PrintApp
-        # ============================================================
-        # 官方参考：kimi-cli-fork/src/kimi_cli/ui/print/__init__.py
-        #
-        # from kimi_cli.ui.print import PrintApp
-        #
-        # app = PrintApp(
-        #     soul=self.soul,
-        #     input_format="text",   # or "stream-json"
-        #     output_format="text",  # or "stream-json"
-        #     context_file=self.session.history_file,
-        # )
-        #
-        # await app.run(command)
-        # ============================================================
-
-    async def run_shell_mode(
-        self,
-        command: str | None,
-    ) -> None:
-        """运行 Shell UI 模式 ⭐ Stage 11 模块化架构.
-
-        Shell 模式是交互式 UI：
-        - 多轮对话（复用同一个 Soul 实例）
-        - Context 自动保持
-        - 优雅退出处理（Ctrl+C, Ctrl+D, exit）
-        - 实时流式输出
-
-        Stage 11 模块化重构：
-        - ✅ console.py    - Console 单例 + 主题配置
-        - ✅ metacmd.py    - 斜杠命令系统（装饰器注册）
-        - ✅ prompt.py     - CustomPromptSession（输入处理）
-        - ✅ visualize.py  - UI Loop 渲染逻辑
-        - ✅ __init__.py   - ShellApp 主入口（协调器）
-
-        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py
-
-        阶段演进：
-        - Stage 9：Shell 交互模式（基础版）✅
-        - Stage 10：UI 美化和增强（enhanced.py.md.backup）✅
-        - Stage 11：模块化重构（按官方架构分层）✅
-
-        Args:
-            command: 初始命令（可选，如果提供则执行单命令模式）
-        """
-        # 导入 UI 模块（延迟导入，避免循环依赖）
-        # Stage 11：使用模块化 ShellApp ⭐
         try:
-            from my_cli.ui.shell import ShellApp
+            soul.set_thinking(thinking)
+        except (LLMNotSet, LLMNotSupported) as e:
+            logger.warning("Failed to enable thinking mode: {error}", error=e)
 
-            app = ShellApp(
-                verbose=self.verbose,
-                work_dir=self.work_dir,
-            )
-            if self.verbose:
-                print("[应用层] 启动 Modular ShellApp (Stage 11)")
+        return MyCLI(soul, runtime, env_overrides)
 
-            # 运行 ShellApp
-            await app.run(command)
+    def __init__(
+        self,
+        _soul: KimiSoul,
+        _runtime: Runtime,
+        _env_overrides: dict[str, str],
+    ) -> None:
+        """初始化 MyCLI 实例（私有）"""
+        self._soul = _soul
+        self._runtime = _runtime
+        self._env_overrides = _env_overrides
 
-        except ImportError as e:
-            # 如果模块化架构导入失败，回退到 Stage 10 增强版
-            if self.verbose:
-                print(f"[应用层] 模块化架构导入失败: {e}")
-                print("[应用层] 回退到 Enhanced Shell UI (Stage 10)")
+    @property
+    def soul(self) -> KimiSoul:
+        """获取 KimiSoul 实例"""
+        return self._soul
 
-            try:
-                from my_cli.ui.shell.enhanced import EnhancedShellUI
+    @property
+    def session(self) -> Session:
+        """获取 Session 实例"""
+        return self._runtime.session
 
-                ui = EnhancedShellUI(
-                    verbose=self.verbose,
-                    work_dir=self.work_dir,
-                )
-                await ui.run(command)
-            except ImportError:
-                # 最终回退到基础版 ShellUI
-                if self.verbose:
-                    print("[应用层] 回退到 Basic Shell UI (Stage 9)")
-                # 此处已无法回退，因为 __init__.py 已被重写
-                raise
+    @contextlib.contextmanager
+    def _app_env(self) -> Generator[None]:
+        """应用环境上下文管理器
 
-        # ============================================================
-        # Stage 11 完成！✅ 已实现官方模块化架构
-        # ============================================================
-        # 当前实现：
-        # - console.py: Console 单例 + 主题配置
-        # - metacmd.py: 斜杠命令系统（装饰器注册）
-        # - prompt.py: CustomPromptSession（命令历史）
-        # - visualize.py: UI Loop 渲染逻辑
-        # - __init__.py: ShellApp 主入口
-        #
-        # TODO Stage 12+：
-        # - keyboard.py: 键盘事件监听
-        # - debug.py: 调试功能
-        # - replay.py: 历史回放
-        # - setup.py: 配置向导
-        # - update.py: 自动更新
-        # - prompt.py 增强：自动补全、状态栏
-        # - metacmd.py 增强：@meta_command 装饰器
-        # ============================================================
+        负责：
+        1. 切换到工作目录
+        2. 重定向 stderr 到日志
+        3. 忽略弃用警告
+
+        对应源码：kimi-cli-fork/src/kimi_cli/app.py:138-148
+        """
+        original_cwd = Path.cwd()
+        os.chdir(self._runtime.session.work_dir)
+        try:
+            # 忽略 dateparser 的弃用警告
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            with contextlib.redirect_stderr(StreamToLogger()):
+                yield
+        finally:
+            os.chdir(original_cwd)
+
+    async def run_shell_mode(self, command: str | None = None) -> bool:
+        """运行 Shell 模式 ⭐ Stage 18 简化版
+
+        TODO Stage 19+: 添加 WelcomeInfoItem 支持
+
+        对应源码：kimi-cli-fork/src/kimi_cli/app.py:150-201
+        """
+        from my_cli.ui.shell import ShellApp
+
+        # TODO: Stage 19+ 添加欢迎信息（WelcomeInfoItem）
+        # 目前简化版不显示欢迎信息
+
+        # 运行 Shell App
+        with self._app_env():
+            app = ShellApp(self._soul)
+            return await app.run(command)
+
+    async def run_print_mode(self, command: str | None) -> None:
+        """运行 Print 模式 ⭐ Stage 18
+
+        对应源码：kimi-cli-fork/src/kimi_cli/app.py:150+
+        """
+        with self._app_env():
+            await self._soul.run_print_mode(command)

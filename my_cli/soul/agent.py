@@ -10,6 +10,8 @@
 
 from pathlib import Path
 
+from kosong.tooling import Toolset
+
 
 class Agent:
     """
@@ -28,10 +30,18 @@ class Agent:
         name: str,
         work_dir: Path,
         system_prompt: str | None = None,
+        toolset: Toolset | None = None,  # ⭐ Stage 19.1: 添加 toolset 参数
     ):
         self.name = name
         self.work_dir = work_dir
         self._system_prompt = system_prompt or self._build_default_system_prompt()
+
+        # ⭐ Stage 19.1: 如果没有提供 toolset，创建空的 CustomToolset
+        if toolset is None:
+            from my_cli.soul.toolset import CustomToolset
+            self.toolset = CustomToolset()
+        else:
+            self.toolset = toolset
 
     def _build_default_system_prompt(self) -> str:
         """

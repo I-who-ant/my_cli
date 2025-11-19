@@ -55,22 +55,29 @@ class KimiSoul:
         self,
         agent: Agent,
         runtime: Runtime,
-        toolset: Toolset,  # ⭐ Stage 8：新增 toolset 参数
-        context: Context | None = None,
+        *,
+        context: Context,
     ):
         """
-        初始化 KimiSoul
+        初始化 KimiSoul ⭐ Stage 18 修复为官方签名
 
         Args:
             agent: Agent 实例（定义身份和能力）
-            runtime: Runtime 实例（管理 ChatProvider）
-            toolset: Toolset 实例（工具集）⭐ Stage 8
-            context: Context 实例（管理对话历史，可选）
+            runtime: Runtime 实例（管理 LLM、配置等）
+            context: Context 实例（管理对话历史）⭐ 必需的关键字参数
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:60-74
         """
         self._agent = agent
         self._runtime = runtime
-        self._toolset = toolset  # ⭐ Stage 8
-        self._context = context or Context()
+        self._context = context
+
+        # 从 runtime 获取其他组件
+        self._denwa_renji = runtime.denwa_renji
+        self._approval = runtime.approval
+
+        # 初始化 thinking 模式
+        self._thinking_effort = "off"  # ⭐ Stage 18：初始化 thinking 模式
 
     @property
     def name(self) -> str:
@@ -80,8 +87,18 @@ class KimiSoul:
     @property
     def model_name(self) -> str:
         """实现 Soul Protocol: model_name 属性"""
-        # ⭐ Stage 17：从 Runtime 的 LLM 获取模型名称
-        return self._runtime.llm.model_name
+        # ⭐ Stage 19.2: 处理 llm 为 None 的情况
+        return self._runtime.llm.model_name if self._runtime.llm else ""
+
+    @property
+    def runtime(self) -> Runtime:
+        """实现 Soul Protocol: runtime 属性 ⭐ Stage 19.1"""
+        return self._runtime
+
+    @property
+    def thinking(self) -> bool:
+        """实现 Soul Protocol: thinking 属性 ⭐ Stage 19.1"""
+        return self._thinking_effort != "off"
 
     @property
     def model_capabilities(self) -> set[str] | None:
@@ -97,7 +114,9 @@ class KimiSoul:
 
         对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:102-106
         """
-        # ⭐ Stage 17：从 Runtime 的 LLM 获取 capabilities
+        # ⭐ Stage 19.2: 处理 llm 为 None 的情况
+        if self._runtime.llm is None:
+            return None
         return self._runtime.llm.capabilities
 
     @property
@@ -150,7 +169,7 @@ class KimiSoul:
 
         # 如果 token_count 为 0，估算为 message_count * 500
         if token_count == 0:
-            message_count = len(self._context.messages)
+            message_count = len(self._context.history)  # ⭐ Stage 19.1: 使用 history 属性
             token_count = message_count * 500
 
         # 计算使用率
@@ -164,7 +183,28 @@ class KimiSoul:
         Returns:
             int: 当前对话轮次数（包括用户和助手消息）
         """
-        return len(self._context.messages)
+        return len(self._context.history)  # ⭐ Stage 19.1: 使用 history 属性
+
+    def set_thinking(self, enabled: bool) -> None:
+        """
+        启用/禁用思考模式 ⭐ Stage 18
+
+        Args:
+            enabled: True 启用思考模式，False 禁用
+
+        Raises:
+            LLMNotSet: 当 LLM 未设置时
+            LLMNotSupported: 当 LLM 不支持思考模式时
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:127-139
+        """
+        from my_cli.soul import LLMNotSet, LLMNotSupported
+
+        if self._runtime.llm is None:
+            raise LLMNotSet()
+        if enabled and "thinking" not in self._runtime.llm.capabilities:
+            raise LLMNotSupported(self._runtime.llm, ["thinking"])
+        self._thinking_effort = "high" if enabled else "off"
 
     async def run(self, user_input: str) -> None:
         """
@@ -298,7 +338,7 @@ class KimiSoul:
             return await kosong.step(
                 chat_provider=self._runtime.llm.chat_provider,  # ⭐ Stage 17：使用 llm.chat_provider
                 system_prompt=self._agent.system_prompt,
-                toolset=self._toolset,
+                toolset=self._agent.toolset,  # ⭐ Stage 18：从 agent 获取 toolset
                 history=self._context.get_messages(),
                 on_message_part=wire_send,
                 on_tool_result=wire_send,

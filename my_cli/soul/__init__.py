@@ -54,8 +54,9 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from kosong.chat_provider.kimi import Kimi
 from kosong.message import ContentPart
+from pydantic import SecretStr
 
-from my_cli.config import get_provider_and_model, load_config
+from my_cli.config import LLMModel, LLMProvider, load_config
 from my_cli.soul.agent import Agent
 # ⭐ 延迟导入 KimiSoul 以避免循环导入（官方做法）
 # from my_cli.soul.kimisoul import KimiSoul
@@ -318,15 +319,37 @@ def create_soul(
 
     # ============================================================
     # Stage 4-5：基础实现 ✅
+    # Stage 19.1：对齐官方架构 ⭐
     # ============================================================
 
     # 1. 加载配置文件
     config = load_config(config_file)
 
-    # 2. 获取 Provider 和 Model 配置
-    provider, model = get_provider_and_model(config, model_name)
+    # 2. 从 config 中获取 Provider 和 Model 配置 ⭐ Stage 19.1
+    model: LLMModel | None = None
+    provider: LLMProvider | None = None
 
-    # 3. 创建 Agent
+    # 尝试使用配置文件
+    if not model_name and config.default_model:
+        # 没有指定 model_name 且配置文件中有 default_model
+        model = config.models[config.default_model]
+        provider = config.providers[model.provider]
+    if model_name and model_name in config.models:
+        # 指定了 model_name 且模型在配置文件中
+        model = config.models[model_name]
+        provider = config.providers[model.provider]
+
+    if not model:
+        # 创建默认 model 和 provider（等待环境变量覆盖）
+        model = LLMModel(provider="", model="", max_context_size=100_000)
+        provider = LLMProvider(type="kimi", base_url="", api_key=SecretStr(""))
+
+    # 3. 应用环境变量覆盖 ⭐ Stage 19.1
+    from my_cli.llm import augment_provider_with_env_vars
+
+    env_overrides = augment_provider_with_env_vars(provider, model)
+
+    # 4. 创建 Agent
     agent = Agent(
         name=agent_name,
         work_dir=work_dir,
@@ -336,7 +359,7 @@ def create_soul(
     # Stage 17：使用 create_llm() 创建 LLM ⭐
     # ============================================================
 
-    # 4. 创建 LLM（使用 create_llm() 工厂函数）⭐ Stage 17
+    # 5. 创建 LLM（使用 create_llm() 工厂函数）⭐ Stage 17
     from my_cli.llm import create_llm
 
     llm = create_llm(
@@ -346,7 +369,7 @@ def create_soul(
         session_id=None,  # Stage 17+：传入 session.id
     )
 
-    # 5. 创建 Runtime（传入 LLM）⭐ Stage 17
+    # 6. 创建 Runtime（传入 LLM）⭐ Stage 17
     runtime = Runtime(
         llm=llm,  # ⭐ Stage 17：传入 LLM 而不是 ChatProvider
         max_steps=20,
@@ -356,12 +379,12 @@ def create_soul(
     # Stage 8：工具系统集成 ⭐
     # ============================================================
 
-    # 6. 创建 SimpleToolset
+    # 7. 创建 SimpleToolset
     from my_cli.tools.toolset import SimpleToolset
 
     toolset = SimpleToolset()  # ⭐ SimpleToolset 自动注册 Bash/ReadFile/WriteFile
 
-    # 7. 创建 KimiSoul（传入 toolset）⭐
+    # 8. 创建 KimiSoul（传入 toolset）⭐
     soul = KimiSoul(
         agent=agent,
         runtime=runtime,

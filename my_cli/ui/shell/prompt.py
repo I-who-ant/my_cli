@@ -406,53 +406,51 @@ class CustomPromptSession:
 
     def __init__(
         self,
-        work_dir: Path | None = None,
-        enable_file_history: bool = True,
-        enable_completer: bool = True,
-        status_provider: Callable[[], "StatusSnapshot"] | None = None,  # ⭐ Stage 16: 状态回调
-        model_capabilities: set[str] | None = None,  # ⭐ Stage 16: 模型能力
+        *,
+        status_provider: Callable[[], "StatusSnapshot"],  # ⭐ Stage 19.1: 必需参数
+        model_capabilities: set[str],  # ⭐ Stage 19.1: 必需参数
+        initial_thinking: bool = False,  # ⭐ Stage 19.1: 初始 thinking 模式
     ):
         """
-        初始化 CustomPromptSession
+        初始化 CustomPromptSession ⭐ Stage 19.1 对齐官方签名
 
         Args:
-            work_dir: 工作目录（用于历史文件）
-            enable_file_history: 是否启用文件历史记录
-            enable_completer: 是否启用自动补全 ⭐ Stage 12 新增
-            status_provider: 状态提供器回调函数 ⭐ Stage 16 新增
-            model_capabilities: 模型能力集合 ⭐ Stage 16 新增
+            status_provider: 状态提供器回调函数（必需）
+            model_capabilities: 模型能力集合（必需）
+            initial_thinking: 初始 thinking 模式（默认 False）
+
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:469-485
         """
-        self.work_dir = work_dir or Path.cwd()
-        self._status_provider = status_provider  # ⭐ Stage 16: 存储回调
-        self._model_capabilities = model_capabilities or set()  # ⭐ Stage 16: 模型能力
+        self.work_dir = Path.cwd()  # ⭐ Stage 19.1: 始终使用当前目录
+        self._status_provider = status_provider
+        self._model_capabilities = model_capabilities
+        self._initial_thinking = initial_thinking  # ⭐ Stage 19.1: 存储初始状态
 
         # ============================================================
         # Stage 13：初始化模式状态 ⭐
         # ============================================================
         self._mode = PromptMode.AGENT  # 默认 Agent 模式
 
-        # 创建历史记录
-        if enable_file_history:
-            # 文件历史（持久化）
-            history_file = self.work_dir / ".mycli_history"
-            self.history = FileHistory(str(history_file))
-        else:
-            # 内存历史（临时）
-            self.history = InMemoryHistory()
+        # 创建历史记录 ⭐ Stage 19.1: 始终启用，使用 work_dir_id 哈希
+        from hashlib import md5
+        from my_cli.share import get_share_dir
+
+        history_dir = get_share_dir() / "user-history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        work_dir_id = md5(str(self.work_dir).encode(encoding="utf-8")).hexdigest()
+        history_file = (history_dir / work_dir_id).with_suffix(".jsonl")
+        self.history = FileHistory(str(history_file))
 
         # ============================================================
-        # Stage 14：创建自动补全器（命令 + 文件）⭐
+        # Stage 14：创建自动补全器（命令 + 文件）⭐ Stage 19.1: 始终启用
         # ============================================================
-        if enable_completer:
-            # 合并多个补全器
-            self.completer = merge_completers(
-                [
-                    MetaCommandCompleter(),  # 斜杠命令补全
-                    FileMentionCompleter(self.work_dir),  # ⭐ Stage 14: 文件路径补全
-                ]
-            )
-        else:
-            self.completer = None
+        # 合并多个补全器
+        self.completer = merge_completers(
+            [
+                MetaCommandCompleter(),  # 斜杠命令补全
+                FileMentionCompleter(self.work_dir),  # ⭐ Stage 14: 文件路径补全
+            ]
+        )
 
         # ============================================================
         # Stage 13：创建自定义键绑定（多行 + 模式切换）⭐

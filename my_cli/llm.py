@@ -266,24 +266,25 @@ def augment_provider_with_env_vars(provider: "LLMProvider", model: "LLMModel") -
 
     match provider.type:
         case "kimi":
-            if base_url := os.getenv("KIMI_BASE_URL"):
+            # ⭐ Stage 19.2: 使用 MY_CLI_ 前缀的环境变量
+            if base_url := os.getenv("MY_CLI_BASE_URL"):
                 provider.base_url = base_url
-                applied["KIMI_BASE_URL"] = base_url
-            if api_key := os.getenv("KIMI_API_KEY"):
+                applied["MY_CLI_BASE_URL"] = base_url
+            if api_key := os.getenv("MY_CLI_API_KEY"):
                 provider.api_key = SecretStr(api_key)
-                applied["KIMI_API_KEY"] = "******"
-            if model_name := os.getenv("KIMI_MODEL_NAME"):
+                applied["MY_CLI_API_KEY"] = "******"
+            if model_name := os.getenv("MY_CLI_MODEL_NAME"):
                 model.model = model_name
-                applied["KIMI_MODEL_NAME"] = model_name
-            if max_context_size := os.getenv("KIMI_MODEL_MAX_CONTEXT_SIZE"):
+                applied["MY_CLI_MODEL_NAME"] = model_name
+            if max_context_size := os.getenv("MY_CLI_MODEL_MAX_CONTEXT_SIZE"):
                 model.max_context_size = int(max_context_size)
-                applied["KIMI_MODEL_MAX_CONTEXT_SIZE"] = max_context_size
-            if capabilities := os.getenv("KIMI_MODEL_CAPABILITIES"):
+                applied["MY_CLI_MODEL_MAX_CONTEXT_SIZE"] = max_context_size
+            if capabilities := os.getenv("MY_CLI_MODEL_CAPABILITIES"):
                 caps_lower = (cap.strip().lower() for cap in capabilities.split(",") if cap.strip())
                 model.capabilities = set(
                     cast(ModelCapability, cap) for cap in caps_lower if cap in get_args(ModelCapability)
                 )
-                applied["KIMI_MODEL_CAPABILITIES"] = capabilities
+                applied["MY_CLI_MODEL_CAPABILITIES"] = capabilities
 
         case "openai_legacy" | "openai_responses":
             if base_url := os.getenv("OPENAI_BASE_URL"):

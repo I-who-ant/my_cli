@@ -1,0 +1,21 @@
+version: 1
+agent:
+  name: "MyCLI Assistant"
+  system_prompt_path: ./system.md
+  system_prompt_args:
+    ROLE_ADDITIONAL: ""
+  tools:
+    # ⭐ Stage 7-8 已实现的工具
+    - "my_cli.tools.bash:Bash"
+    - "my_cli.tools.file:ReadFile"
+    - "my_cli.tools.file:WriteFile"
+    # TODO: Stage 9+ 待实现的工具
+    # - "my_cli.tools.task:Task"
+    # - "my_cli.tools.think:Think"
+    # - "my_cli.tools.todo:SetTodoList"
+    # - "my_cli.tools.file:Glob"
+    # - "my_cli.tools.file:Grep"
+    # - "my_cli.tools.file:StrReplaceFile"
+    # - "my_cli.tools.file:PatchFile"
+    # - "my_cli.tools.web:SearchWeb"
+    # - "my_cli.tools.web:FetchURL"

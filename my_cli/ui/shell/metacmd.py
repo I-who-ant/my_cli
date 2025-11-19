@@ -75,6 +75,56 @@ def get_meta_commands() -> list[MetaCommand]:
     return list(_meta_commands.values())
 
 
+def meta_command(
+    func: MetaCmdFunc | None = None,
+    *,
+    name: str | None = None,
+    aliases: list[str] | None = None,
+) -> MetaCmdFunc | Callable[[MetaCmdFunc], MetaCmdFunc]:
+    """
+    装饰器：注册斜杠命令 ⭐ Stage 19.2
+
+    用法：
+        @meta_command
+        def setup(app, args): ...
+
+        @meta_command(name="config")
+        def configure(app, args): ...
+
+        @meta_command(aliases=["h", "?"])
+        def help(app, args): ...
+
+    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/metacmd.py:84-135
+    """
+
+    def _register(f: MetaCmdFunc) -> MetaCmdFunc:
+        """内部注册函数"""
+        primary = name or f.__name__
+        alias_list = aliases or []
+
+        cmd = MetaCommand(
+            name=primary,
+            description=(f.__doc__ or "").strip(),
+            func=f,
+            aliases=alias_list,
+        )
+
+        # 注册主命令
+        _meta_commands[primary] = cmd
+        _meta_command_aliases[primary] = cmd
+
+        # 注册别名
+        for alias in alias_list:
+            _meta_command_aliases[alias] = cmd
+
+        return f
+
+    # 支持两种用法：@meta_command 和 @meta_command(...)
+    if func is not None:
+        return _register(func)
+    return _register
+
+
 def register_meta_command(
     name: str,
     description: str,

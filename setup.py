@@ -42,9 +42,9 @@ setup(
     packages=find_packages(),
     python_requires=">=3.10",
 
-    # 依赖
+    # 依赖 ⭐ Stage 19.1: 切换到 Typer
     install_requires=[
-        "click>=8.1.0",
+        "typer>=0.9.0",
     ],
 
     # 可选依赖（后续阶段需要）
@@ -67,11 +67,11 @@ setup(
         ],
     },
 
-    # 🎯 这是关键！定义命令行入口
+    # 🎯 这是关键！定义命令行入口 ⭐ Stage 19.1: Typer 应用对象
     entry_points={
         "console_scripts": [
-            # 格式：命令名=模块.文件:函数名
-            "my_cli=my_cli.cli:my_cli",
+            # 格式：命令名=模块.文件:Typer应用对象
+            "my_cli=my_cli.cli:cli",
         ],
     },
 
