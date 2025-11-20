@@ -17,22 +17,29 @@ Metadata - 元数据管理
 from __future__ import annotations
 
 import json
+import os
 from hashlib import md5
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 # ============================================================
-# Stage 4-16：版本信息（保持不变）
+# Stage 18：动态版本读取 ⭐
 # ============================================================
 
-VERSION = "0.1.0"
+try:
+    from importlib.metadata import version
+
+    VERSION = version("my_cli")
+except Exception:
+    VERSION = "0.1.0"  # 开发模式降级
+
 """版本号"""
 
-BUILD_COMMIT = "unknown"
+BUILD_COMMIT = os.getenv("BUILD_COMMIT", "unknown")
 """构建 commit"""
 
-BUILD_TIME = "unknown"
+BUILD_TIME = os.getenv("BUILD_TIME", "unknown")
 """构建时间"""
 
 
@@ -58,11 +65,11 @@ def get_metadata_file() -> Path:
     """获取元数据文件路径
 
     Returns:
-        Path: 元数据文件路径 (~/.kimi/kimi.json)
+        Path: 元数据文件路径 (~/.mc/my_cli.json)
 
     对应源码：kimi-cli-fork/src/kimi_cli/metadata.py:13-14
     """
-    return get_share_dir() / "kimi.json"
+    return get_share_dir() / "my_cli.json"
 
 
 class WorkDirMeta(BaseModel):
@@ -142,25 +149,3 @@ def save_metadata(metadata: Metadata):
     metadata_file = get_metadata_file()
     with open(metadata_file, "w", encoding="utf-8") as f:
         json.dump(metadata.model_dump(), f, indent=2, ensure_ascii=False)
-
-
-# ============================================================
-# TODO: Stage 18+ 从 package metadata 读取版本
-# ============================================================
-# 官方参考：kimi-cli-fork/src/kimi_cli/metadata.py
-#
-# Stage 18+ 需要：
-# 1. 从 importlib.metadata 读取版本
-# 2. 从环境变量读取构建信息
-#
-# 实现：
-# try:
-#     from importlib.metadata import version
-#     VERSION = version("my_cli")
-# except Exception:
-#     VERSION = "unknown"
-#
-# import os
-# BUILD_COMMIT = os.getenv("BUILD_COMMIT", "unknown")
-# BUILD_TIME = os.getenv("BUILD_TIME", "unknown")
-# ============================================================
