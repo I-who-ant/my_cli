@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from functools import partial
 from typing import TYPE_CHECKING
@@ -24,21 +25,27 @@ from kosong.chat_provider import (
     APIEmptyResponseError,
     APIStatusError,
     APITimeoutError,
+    ThinkingEffort,
 )
 from kosong.message import Message, TextPart
 from kosong.tooling import Toolset
 from tenacity import RetryCallState, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 from my_cli.soul.agent import Agent
+from my_cli.soul.compaction import SimpleCompaction
 from my_cli.soul.context import Context
 from my_cli.soul.message import check_message, system, tool_result_to_message
 from my_cli.soul.runtime import Runtime
 from my_cli.utils.logging import logger
 from my_cli.wire.message import StepBegin
-from my_cli.soul import LLMNotSupported
+from my_cli.soul import LLMNotSet, LLMNotSupported
 
 if TYPE_CHECKING:
     from my_cli.soul import wire_send, StatusSnapshot  # 避免循环导入，仅用于类型提示
+
+
+# 保留的 token 数量（用于压缩阈值计算）
+RESERVED_TOKENS = 50_000
 
 
 class BackToTheFuture(Exception):
@@ -95,9 +102,16 @@ class KimiSoul:
         # 从 runtime 获取其他组件
         self._denwa_renji = runtime.denwa_renji
         self._approval = runtime.approval
+        self._loop_control = runtime.config.loop_control
+        self._compaction = SimpleCompaction()  # ⭐ Stage 19: 压缩策略
+        self._reserved_tokens = RESERVED_TOKENS
+
+        # 检查 LLM 是否超过保留 token 限制
+        if self._runtime.llm is not None:
+            assert self._reserved_tokens <= self._runtime.llm.max_context_size
 
         # 初始化 thinking 模式
-        self._thinking_effort = "off"  # ⭐ Stage 18：初始化 thinking 模式
+        self._thinking_effort: ThinkingEffort = "off"  # ⭐ Stage 18：初始化 thinking 模式
 
     @property
     def name(self) -> str:
@@ -557,48 +571,78 @@ class KimiSoul:
         """压缩 Context（减少 token 使用）⭐ Stage 19
 
         流程：
-        1. 发送 CompactionBegin Wire 事件
-        2. 使用 SimpleCompaction 生成摘要
-        3. 替换旧消息为摘要
-        4. 发送 CompactionEnd Wire 事件
+        1. 使用 retry 装饰器调用压缩
+        2. 回滚到检查点 0
+        3. 创建新检查点
+        4. 添加压缩后的消息
 
-        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py（参考文档）
+        Raises:
+            LLMNotSet: LLM 未配置
+            ChatProviderError: LLM API 错误
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:302-327
         """
-        from my_cli.soul.compaction import SimpleCompaction
-        from my_cli.soul import wire_send
-        from my_cli.wire.message import CompactionBegin, CompactionEnd
 
-        # 1. 检查 LLM 是否可用
-        if not self._runtime.llm:
-            logger.warning("LLM not available, skipping compaction")
-            return
+        @tenacity.retry(
+            retry=retry_if_exception(self._is_retryable_error),
+            before_sleep=partial(self._retry_log, "compaction"),
+            wait=wait_exponential_jitter(initial=0.3, max=5, jitter=0.5),
+            stop=stop_after_attempt(self._loop_control.max_retries_per_step),
+            reraise=True,
+        )
+        async def _compact_with_retry() -> Sequence[Message]:
+            if self._runtime.llm is None:
+                raise LLMNotSet()
+            return await self._compaction.compact(self._context.history, self._runtime.llm)
 
-        # 2. 发送开始事件
-        wire_send(CompactionBegin())
+        compacted_messages = await _compact_with_retry()
+        await self._context.revert_to(0)
+        await self._checkpoint()
+        await self._context.append_message(compacted_messages)
 
-        try:
-            # 3. 使用 SimpleCompaction 压缩
-            compaction = SimpleCompaction()
-            compacted_messages = await compaction.compact(
-                messages=self._context.history,
-                llm=self._runtime.llm,
-            )
+    async def _checkpoint(self):
+        """创建检查点 ⭐ Stage 19
 
-            # 4. 替换 Context 中的消息
-            # 清空现有历史
-            self._context._history.clear()
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py（参考上下文功能）
+        """
+        await self._context.checkpoint(add_user_message=False)
+        self._denwa_renji.set_n_checkpoints(self._context.n_checkpoints)
 
-            # 添加压缩后的消息
-            for msg in compacted_messages:
-                self._context._history.append(msg)
+    @staticmethod
+    def _is_retryable_error(exception: BaseException) -> bool:
+        """判断错误是否可重试 ⭐ Stage 19
 
-            logger.info("Context compacted: {before} -> {after} messages",
-                       before=len(self._context.history),
-                       after=len(compacted_messages))
+        可重试的错误：
+        - APIConnectionError: 连接错误
+        - APITimeoutError: 超时错误
+        - APIEmptyResponseError: 空响应错误
+        - APIStatusError: 状态码 429, 500, 502, 503
 
-        finally:
-            # 5. 发送结束事件
-            wire_send(CompactionEnd())
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:329-337
+        """
+        if isinstance(exception, (APIConnectionError, APITimeoutError, APIEmptyResponseError)):
+            return True
+        return isinstance(exception, APIStatusError) and exception.status_code in (
+            429,  # Too Many Requests
+            500,  # Internal Server Error
+            502,  # Bad Gateway
+            503,  # Service Unavailable
+        )
+
+    @staticmethod
+    def _retry_log(name: str, retry_state: RetryCallState):
+        """记录重试日志 ⭐ Stage 19
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:339-346
+        """
+        logger.info(
+            "Retrying {name} for the {n} time. Waiting {sleep} seconds.",
+            name=name,
+            n=retry_state.attempt_number,
+            sleep=retry_state.next_action.sleep
+            if retry_state.next_action is not None
+            else "unknown",
+        )
 
 
 
