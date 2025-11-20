@@ -39,6 +39,7 @@ from my_cli.soul.runtime import Runtime
 from my_cli.utils.logging import logger
 from my_cli.wire.message import StepBegin
 from my_cli.soul import LLMNotSet, LLMNotSupported
+from my_cli.tools.dmail import NAME as SendDMail_NAME  # ⭐ Stage 20
 
 if TYPE_CHECKING:
     from my_cli.soul import wire_send, StatusSnapshot  # 避免循环导入，仅用于类型提示
@@ -112,6 +113,13 @@ class KimiSoul:
 
         # 初始化 thinking 模式
         self._thinking_effort: ThinkingEffort = "off"  # ⭐ Stage 18：初始化 thinking 模式
+
+        # ⭐ Stage 20：检查是否有 SendDMail 工具，决定 checkpoint 策略
+        self._checkpoint_with_user_message = False
+        for tool in agent.toolset.tools:
+            if tool.name == SendDMail_NAME:
+                self._checkpoint_with_user_message = True
+                break
 
     @property
     def name(self) -> str:
@@ -304,15 +312,17 @@ class KimiSoul:
 
     async def _agent_loop(self) -> None:
         """
-        Agent 循环（主循环）⭐ Stage 16 按官方实现
+        Agent 循环（主循环）⭐ Stage 20 完整实现（含 D-Mail 支持）
 
         官方实现要点：
         1. step_no 从 1 开始循环
         2. 每步发送 StepBegin 事件
-        3. 调用 _step() 执行一步 ⭐ 官方模式
-        4. _step() 返回 should_stop（True 表示没有工具调用，应该停止）
-        5. 如果 should_stop，return（完成）
-        6. 如果达到最大步数，raise MaxStepsReached
+        3. 每步创建 checkpoint 并更新 DenwaRenji
+        4. 调用 _step() 执行一步 ⭐ 官方模式
+        5. 捕获 BackToTheFuture 异常，处理时间回滚
+        6. _step() 返回 should_stop（True 表示没有工具调用，应该停止）
+        7. 如果 should_stop，return（完成）
+        8. 如果达到最大步数，raise MaxStepsReached
 
         对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py:157-205
         """
@@ -325,8 +335,28 @@ class KimiSoul:
             # 发送步骤开始事件
             wire_send(StepBegin(n=step_no))
 
-            # 调用 _step() 执行一步 ⭐ 官方模式
-            should_stop = await self._step()
+            try:
+                # ⭐ Stage 20：每步创建 checkpoint（支持 D-Mail 回滚）
+                await self._checkpoint()
+
+                # 调用 _step() 执行一步 ⭐ 官方模式
+                should_stop = await self._step()
+
+            except BackToTheFuture as e:
+                # ============================================================
+                # Stage 20：处理时间回滚 ⭐
+                # ============================================================
+                # 回滚到目标 checkpoint
+                await self._context.revert_to(e.checkpoint_id)
+
+                # 创建新 checkpoint
+                await self._checkpoint()
+
+                # 添加 D-Mail 消息
+                await self._context.append_message(e.messages)
+
+                # 继续循环（不增加 step_no，相当于重新执行这一步）
+                continue
 
             # 判断是否继续循环
             if should_stop:
@@ -398,6 +428,23 @@ class KimiSoul:
 
         # 调用 _grow_context() 将结果添加到 Context ⭐ 官方模式
         await self._grow_context(result, tool_results)
+
+        # ============================================================
+        # Stage 20：D-Mail 检测和处理 ⭐
+        # ============================================================
+        # 检查是否有待处理的 D-Mail
+        if dmail := self._denwa_renji.fetch_pending_dmail():
+            # 验证 checkpoint_id 有效性（DenwaRenji 已经验证过，这里是双重保险）
+            assert dmail.checkpoint_id >= 0, "DenwaRenji guarantees checkpoint_id >= 0"
+            assert dmail.checkpoint_id < self._context.n_checkpoints, (
+                "DenwaRenji guarantees checkpoint_id < n_checkpoints"
+            )
+
+            # 抛出 BackToTheFuture 异常，让主循环处理时间回滚
+            raise BackToTheFuture(
+                dmail.checkpoint_id,
+                [Message(role="user", content=dmail.message)],
+            )
 
         # 返回 should_stop
         # 如果 LLM 没有调用工具，说明任务完成
@@ -601,11 +648,15 @@ class KimiSoul:
         await self._context.append_message(compacted_messages)
 
     async def _checkpoint(self):
-        """创建检查点 ⭐ Stage 19
+        """创建检查点 ⭐ Stage 19/20
+
+        根据是否启用 SendDMail 工具决定 checkpoint 策略：
+        - 如果启用 SendDMail：add_user_message=True（在 user 消息后创建 checkpoint）
+        - 否则：add_user_message=False（立即创建 checkpoint）
 
         对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py（参考上下文功能）
         """
-        await self._context.checkpoint(add_user_message=False)
+        await self._context.checkpoint(add_user_message=self._checkpoint_with_user_message)
         self._denwa_renji.set_n_checkpoints(self._context.n_checkpoints)
 
     @staticmethod
