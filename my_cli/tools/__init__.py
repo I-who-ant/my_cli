@@ -151,17 +151,7 @@ def extract_key_argument(
                 return None
             key_argument = str(curr_args["query"])
 
-        case "WebSearch":  # ⭐ Stage 21.2: 添加 WebSearch 支持
-            if not isinstance(curr_args, dict) or not curr_args.get("query"):
-                return None
-            key_argument = str(curr_args["query"])
-
         case "FetchURL":
-            if not isinstance(curr_args, dict) or not curr_args.get("url"):
-                return None
-            key_argument = str(curr_args["url"])
-
-        case "WebFetch":  # ⭐ Stage 21.2: 添加 WebFetch 支持
             if not isinstance(curr_args, dict) or not curr_args.get("url"):
                 return None
             key_argument = str(curr_args["url"])

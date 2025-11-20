@@ -17,10 +17,12 @@ from collections.abc import Sequence
 from kosong.message import ToolCall
 from kosong.tooling import CallableTool2, Tool, ToolResult, ToolResultFuture, HandleResult
 
+from my_cli.config import Config
+from my_cli.tools import SkipThisTool
 from my_cli.tools.bash import Bash
 from my_cli.tools.file import ReadFile, WriteFile
 from my_cli.tools.think import Think  # ⭐ Stage 21.1: 导入 Think 工具
-from my_cli.tools.web import WebSearch, WebFetch  # ⭐ Stage 21.2: 导入 Web 工具
+from my_cli.tools.web import SearchWeb, FetchURL  # ⭐ Stage 21.2: 导入 Web 工具
 from my_cli.tools.todo import SetTodoList  # ⭐ Stage 21.3: 导入 Todo 工具
 
 __all__ = ["SimpleToolset"]
@@ -42,18 +44,31 @@ class SimpleToolset:
     对应官方：kosong-main/src/kosong/tooling/simple.py:SimpleToolset
     """
 
-    def __init__(self):
-        """初始化工具集"""
+    def __init__(self, config: Config):
+        """初始化工具集
+
+        Args:
+            config: 全局配置对象（传递给需要配置的工具）
+        """
         # 创建工具实例
         self._tool_instances: dict[str, CallableTool2] = {
             "Bash": Bash(),
             "ReadFile": ReadFile(),
             "WriteFile": WriteFile(),
             "Think": Think(),  # ⭐ Stage 21.1: 注册 Think 工具
-            "WebSearch": WebSearch(),  # ⭐ Stage 21.2: 注册 WebSearch 工具
-            "WebFetch": WebFetch(),  # ⭐ Stage 21.2: 注册 WebFetch 工具
             "SetTodoList": SetTodoList(),  # ⭐ Stage 21.3: 注册 SetTodoList 工具
         }
+
+        # ⭐ Stage 21.2: 注册需要 Config 的 Web 工具
+        # SearchWeb 需要 moonshot_search 配置，如果缺失会抛出 SkipThisTool
+        try:
+            self._tool_instances["SearchWeb"] = SearchWeb(config)
+        except SkipThisTool:
+            # 配置缺失，跳过 SearchWeb 工具
+            pass
+
+        # FetchURL 不需要配置
+        self._tool_instances["FetchURL"] = FetchURL()
 
     @property
     def tools(self) -> list[Tool]:
