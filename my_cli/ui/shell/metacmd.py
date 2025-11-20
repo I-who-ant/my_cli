@@ -236,6 +236,43 @@ async def context(app: "ShellApp", args: list[str]) -> None:
     console.print(Panel(info_text, border_style="cyan", title="Context Info"))
 
 
+@meta_command
+def debug(app: "ShellApp", args: list[str]) -> None:
+    """切换调试模式"""
+    import logging
+
+    # 获取根 logger
+    root_logger = logging.getLogger()
+    current_level = root_logger.level
+
+    if current_level == logging.DEBUG:
+        root_logger.setLevel(logging.INFO)
+        console.print("[green]✓[/green] 调试模式已关闭")
+    else:
+        root_logger.setLevel(logging.DEBUG)
+        console.print("[green]✓[/green] 调试模式已开启")
+
+
+@meta_command
+def model(app: "ShellApp", args: list[str]) -> None:
+    """显示当前模型信息"""
+    from my_cli.soul.kimisoul import KimiSoul
+
+    if not isinstance(app.soul, KimiSoul):
+        console.print("[yellow]⚠️  当前 Soul 不支持 /model 命令[/yellow]")
+        return
+
+    model_name = app.soul.model_name
+    capabilities = app.soul.model_capabilities or set()
+
+    info_text = f"""[bold]模型信息：[/bold]
+
+  名称: {model_name}
+  能力: {', '.join(capabilities) if capabilities else '无'}
+"""
+    console.print(Panel(info_text, border_style="cyan", title="Model Info"))
+
+
 # ============================================================
 # 删除旧的注册方式（已使用装饰器）
 # ============================================================
