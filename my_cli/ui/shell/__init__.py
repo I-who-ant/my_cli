@@ -250,19 +250,19 @@ class ShellApp:
             if asyncio.iscoroutine(result):
                 await result
         except Exception as e:
-            # ⭐ 对齐官方：使用独立的 Reload 处理子句
+            # ⭐ 对齐官方：不同异常类型的处理
             from my_cli.cli import Reload
-            from my_cli.exception import LLMNotSet, ChatProviderError
+            from my_cli.soul import LLMNotSet
+            from kosong.chat_provider import ChatProviderError
 
-            # 重新检查异常类型，使用官方模式
             if isinstance(e, LLMNotSet):
                 console.print("[red]LLM 未设置，请使用 /setup 配置[/red]")
             elif isinstance(e, ChatProviderError):
                 console.print(f"[red]LLM API 错误: {e}[/red]")
             elif isinstance(e, Reload):
-                raise  # ⭐ 向上传播
+                raise  # ⭐ 向上传播到 cli.py
             else:
-                # 其他异常
+                # 其他异常：打印错误
                 console.print(f"[red]❌ 命令执行失败: {e}[/red]")
                 import traceback
                 traceback.print_exc()
