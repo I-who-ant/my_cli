@@ -155,7 +155,8 @@ def register_meta_command(
 # ============================================================
 
 
-async def _cmd_help(app: "ShellApp", args: list[str]) -> None:
+@meta_command(aliases=["h", "?"])
+async def help(app: "ShellApp", args: list[str]) -> None:
     """显示帮助信息"""
     help_text = """[bold cyan]📚 可用命令：[/bold cyan]
 
@@ -184,30 +185,60 @@ async def _cmd_help(app: "ShellApp", args: list[str]) -> None:
     console.print(Panel(help_text, border_style="cyan", padding=(1, 2)))
 
 
-async def _cmd_clear(app: "ShellApp", args: list[str]) -> None:
-    """清空 Context"""
-    # TODO: 实现 Context.clear() 方法
-    console.print("[yellow]⚠️  /clear 命令暂未实现（需要 Context.clear() 方法）[/yellow]")
-    console.print("[grey50]提示：重启程序可清空历史[/grey50]")
+@meta_command(aliases=["reset"])
+async def clear(app: "ShellApp", args: list[str]) -> None:
+    """清空对话历史（Context）"""
+    from my_cli.cli import Reload
+    from my_cli.soul.kimisoul import KimiSoul
+
+    if not isinstance(app.soul, KimiSoul):
+        console.print("[yellow]⚠️  当前 Soul 不支持 /clear 命令[/yellow]")
+        return
+
+    # 检查是否有检查点
+    if app.soul._context.n_checkpoints == 0:
+        console.print("[yellow]Context 已为空[/yellow]")
+        raise Reload()
+
+    # 回滚到初始状态
+    await app.soul._context.revert_to(0)
+    console.print("[green]✓[/green] Context 已清空")
+    raise Reload()
+
+
+@meta_command
+def version(app: "ShellApp", args: list[str]) -> None:
+    """显示版本信息"""
+    from my_cli.metadata import VERSION
+
+    console.print(f"my_cli, version {VERSION}")
+
+
+@meta_command(aliases=["c"])
+async def context(app: "ShellApp", args: list[str]) -> None:
+    """查看 Context 状态"""
+    from my_cli.soul.kimisoul import KimiSoul
+
+    if not isinstance(app.soul, KimiSoul):
+        console.print("[yellow]⚠️  当前 Soul 不支持 /context 命令[/yellow]")
+        return
+
+    ctx = app.soul._context
+    n_messages = len(ctx.history)
+    n_checkpoints = ctx.n_checkpoints
+
+    info_text = f"""[bold]Context 状态：[/bold]
+
+  消息数量: {n_messages}
+  检查点数: {n_checkpoints}
+  模型: {app.soul.model_name}
+"""
+    console.print(Panel(info_text, border_style="cyan", title="Context Info"))
 
 
 # ============================================================
-# 注册内置命令
+# 删除旧的注册方式（已使用装饰器）
 # ============================================================
-
-register_meta_command(
-    name="help",
-    description="显示此帮助信息",
-    func=_cmd_help,
-    aliases=["h", "?"],
-)
-
-register_meta_command(
-    name="clear",
-    description="清空对话历史（Context）",
-    func=_cmd_clear,
-    aliases=["c"],
-)
 
 __all__ = [
     "MetaCommand",
