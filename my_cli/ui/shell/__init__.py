@@ -246,6 +246,11 @@ class ShellApp:
             if asyncio.iscoroutine(result):
                 await result
         except Exception as e:
+            # ⭐ 特殊处理：Reload 异常需要向上传播
+            from my_cli.cli import Reload
+            if isinstance(e, Reload):
+                raise  # 向上传播，由 cli.py 的 while 循环捕获
+
             console.print(f"[red]❌ 命令执行失败: {e}[/red]")
             # TODO: Stage 19+ 添加 verbose 模式支持
             import traceback
