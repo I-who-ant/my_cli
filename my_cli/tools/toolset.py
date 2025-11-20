@@ -19,6 +19,7 @@ from kosong.tooling import CallableTool2, Tool, ToolResult, ToolResultFuture, Ha
 
 from my_cli.tools.bash import Bash
 from my_cli.tools.file import ReadFile, WriteFile
+from my_cli.tools.think import Think  # ⭐ Stage 21: 导入 Think 工具
 
 __all__ = ["SimpleToolset"]
 
@@ -46,6 +47,7 @@ class SimpleToolset:
             "Bash": Bash(),
             "ReadFile": ReadFile(),
             "WriteFile": WriteFile(),
+            "Think": Think(),  # ⭐ Stage 21: 注册 Think 工具
         }
 
     @property
