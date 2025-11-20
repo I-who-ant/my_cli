@@ -273,6 +273,32 @@ def model(app: "ShellApp", args: list[str]) -> None:
     console.print(Panel(info_text, border_style="cyan", title="Model Info"))
 
 
+@meta_command
+async def compact(app: "ShellApp", args: list[str]) -> None:
+    """压缩上下文（减少 token 使用）"""
+    from my_cli.soul.kimisoul import KimiSoul
+
+    if not isinstance(app.soul, KimiSoul):
+        console.print("[yellow]⚠️  当前 Soul 不支持 /compact 命令[/yellow]")
+        return
+
+    # 检查是否有内容需要压缩
+    if app.soul._context.n_checkpoints == 0:
+        console.print("[yellow]Context 为空，无需压缩[/yellow]")
+        return
+
+    # 显示压缩中提示
+    console.print("[cyan]正在压缩 Context...[/cyan]")
+
+    try:
+        await app.soul.compact_context()
+        console.print("[green]✓[/green] Context 已压缩")
+    except AttributeError:
+        console.print("[yellow]⚠️  KimiSoul 未实现 compact_context 方法[/yellow]")
+    except Exception as e:
+        console.print(f"[red]❌ 压缩失败: {e}[/red]")
+
+
 # ============================================================
 # 删除旧的注册方式（已使用装饰器）
 # ============================================================
