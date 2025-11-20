@@ -221,20 +221,71 @@ class MyCLI:
             os.chdir(original_cwd)
 
     async def run_shell_mode(self, command: str | None = None) -> bool:
-        """运行 Shell 模式 ⭐ Stage 18 简化版
+        """运行 Shell 模式 ⭐ Stage 19.3
 
-        TODO Stage 19+: 添加 WelcomeInfoItem 支持
+        构建 WelcomeInfoItem 列表并传递给 ShellApp
 
         对应源码：kimi-cli-fork/src/kimi_cli/app.py:150-201
         """
-        from my_cli.ui.shell import ShellApp
+        from my_cli.ui.shell import ShellApp, WelcomeInfoItem
+        from my_cli.utils.path import shorten_home
 
-        # TODO: Stage 19+ 添加欢迎信息（WelcomeInfoItem）
-        # 目前简化版不显示欢迎信息
+        # ⭐ Stage 19.3: 构建欢迎信息列表
+        welcome_info = [
+            WelcomeInfoItem(
+                name="Directory", value=str(shorten_home(self._runtime.session.work_dir))
+            ),
+            WelcomeInfoItem(name="Session", value=self._runtime.session.id),
+        ]
+
+        # 检查环境变量覆盖
+        if base_url := self._env_overrides.get("MY_CLI_BASE_URL"):
+            welcome_info.append(
+                WelcomeInfoItem(
+                    name="API URL",
+                    value=f"{base_url} (from MY_CLI_BASE_URL)",
+                    level=WelcomeInfoItem.Level.WARN,
+                )
+            )
+
+        if self._env_overrides.get("MY_CLI_API_KEY"):
+            welcome_info.append(
+                WelcomeInfoItem(
+                    name="API Key",
+                    value="****** (from MY_CLI_API_KEY)",
+                    level=WelcomeInfoItem.Level.WARN,
+                )
+            )
+
+        # 模型信息
+        if not self._runtime.llm:
+            welcome_info.append(
+                WelcomeInfoItem(
+                    name="Model",
+                    value="not set, send /setup to configure",
+                    level=WelcomeInfoItem.Level.WARN,
+                )
+            )
+        elif "MY_CLI_MODEL_NAME" in self._env_overrides:
+            welcome_info.append(
+                WelcomeInfoItem(
+                    name="Model",
+                    value=f"{self._soul.model_name} (from MY_CLI_MODEL_NAME)",
+                    level=WelcomeInfoItem.Level.WARN,
+                )
+            )
+        else:
+            welcome_info.append(
+                WelcomeInfoItem(
+                    name="Model",
+                    value=self._soul.model_name,
+                    level=WelcomeInfoItem.Level.INFO,
+                )
+            )
 
         # 运行 Shell App
         with self._app_env():
-            app = ShellApp(self._soul)
+            app = ShellApp(self._soul, welcome_info=welcome_info)
             return await app.run(command)
 
     async def run_print_mode(self, command: str | None) -> None:

@@ -31,10 +31,15 @@ Stage 11：Shell UI 模块化重构
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 from kosong.chat_provider import ChatProviderError
+from rich.console import Group, RenderableType
 from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from my_cli.soul import LLMNotSet, RunCancelled, run_soul
 from my_cli.ui.shell.console import console
@@ -42,7 +47,7 @@ from my_cli.ui.shell.metacmd import get_meta_command
 from my_cli.ui.shell.prompt import CustomPromptSession, UserInput
 from my_cli.ui.shell.visualize import visualize
 
-__all__ = ["ShellApp"]
+__all__ = ["ShellApp", "WelcomeInfoItem"]
 
 
 class ShellApp:
@@ -62,18 +67,18 @@ class ShellApp:
     - Stage 11：模块化重构（按官方架构分层）✅
     """
 
-    def __init__(self, soul, welcome_info: list | None = None):
+    def __init__(self, soul, welcome_info: list[WelcomeInfoItem] | None = None):
         """
-        初始化 ShellApp ⭐ Stage 18 修复为官方签名
+        初始化 ShellApp ⭐ Stage 19.3
 
         Args:
             soul: Soul 实例（由 MyCLI.create() 创建）
-            welcome_info: 欢迎信息列表（可选，Stage 19+ 支持）
+            welcome_info: 欢迎信息列表（WelcomeInfoItem 对象）
 
-        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:32-42
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:30-33
         """
         self.soul = soul
-        self.welcome_info = welcome_info or []  # TODO: Stage 19+ 显示欢迎信息
+        self._welcome_info = list(welcome_info or [])  # ⭐ Stage 19.3: 使用官方命名
 
     async def run(self, command: str | None = None) -> bool:
         """
@@ -104,8 +109,8 @@ class ShellApp:
         # 模式 2：交互循环模式 ⭐ Stage 11 模块化版
         # ============================================================
 
-        # 2. 显示欢迎信息
-        _print_welcome_info(self.soul.name, self.soul.model_name)
+        # 2. 显示欢迎信息 ⭐ Stage 19.3: 使用 WelcomeInfoItem
+        _print_welcome_info(self.soul.name or "MyCLI Assistant", self._welcome_info)
 
         # 3. 创建 CustomPromptSession（模块化）⭐ Stage 19.1: 对齐官方签名
         with CustomPromptSession(
@@ -238,7 +243,111 @@ class ShellApp:
             traceback.print_exc()
 
 
-def _print_welcome_info(name: str, model: str) -> None:
+# ============================================================
+# WelcomeInfoItem - 欢迎信息数据类 ⭐ Stage 19.3
+# ============================================================
+
+
+_MY_CLI_CYAN = "cyan"
+# ⭐ Arch Linux 官方完整 Logo
+_LOGO = f"""\
+[{_MY_CLI_CYAN}]\
+                   ▄
+                  ▟█▙
+                 ▟███▙
+                ▟█████▙
+               ▟███████▙
+              ▂▔▀▜██████▙
+             ▟██▅▂▝▜█████▙
+            ▟█████████████▙
+           ▟███████████████▙
+          ▟█████████████████▙
+         ▟███████████████████▙
+        ▟█████████▛▀▀▜████████▙
+       ▟████████▛      ▜███████▙
+      ▟█████████        ████████▙
+     ▟██████████        █████▆▅▄▃▂
+    ▟██████████▛        ▜█████████▙
+   ▟██████▀▀▀              ▀▀██████▙
+  ▟███▀▘                       ▝▀███▙
+ ▟▛▀                               ▀▜▙\
+[/{_MY_CLI_CYAN}]\
+"""
+
+
+@dataclass(slots=True)
+class WelcomeInfoItem:
+    """
+    欢迎信息条目 ⭐ Stage 19.3
+
+    用于在启动时显示配置信息，如模型、目录、环境变量覆盖等。
+
+    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:282-291
+    """
+
+    class Level(Enum):
+        """信息级别（影响颜色）"""
+
+        INFO = "grey50"  # 普通信息
+        WARN = "yellow"  # 警告（如环境变量覆盖）
+        ERROR = "red"  # 错误
+
+    name: str  # 信息名称（如 "Model"）
+    value: str  # 信息值（如 "kimi-k2-thinking-turbo"）
+    level: Level = Level.INFO  # 信息级别
+
+
+def _print_welcome_info(name: str, info_items: list[WelcomeInfoItem]) -> None:
+    """
+    打印欢迎信息 ⭐ Stage 19.3 官方版
+
+    使用 rich Table + Panel 显示：
+    - Logo + 标题
+    - 帮助提示
+    - 信息列表（带颜色）
+
+    Args:
+        name: 应用名称（如 "MyCLI Assistant"）
+        info_items: 信息列表
+
+    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:294-330
+    """
+    head = Text.from_markup(f"[bold]Welcome to {name}![/bold]")
+    help_text = Text.from_markup("[grey50]Send /help for help information.[/grey50]")
+
+    # 使用 Table 实现 Logo + 标题的并排布局
+    logo = Text.from_markup(_LOGO)
+    table = Table(show_header=False, show_edge=False, box=None, padding=(0, 1), expand=False)
+    table.add_column(justify="left")
+    table.add_column(justify="left")
+    table.add_row(logo, Group(head, help_text))
+
+    rows: list[RenderableType] = [table]
+
+    # 添加空行
+    rows.append(Text(""))
+
+    # 添加信息条目（带颜色）
+    for item in info_items:
+        rows.append(Text(f"{item.name}: {item.value}", style=item.level.value))
+
+    # 使用 Panel 显示
+    console.print(
+        Panel(
+            Group(*rows),
+            border_style=_MY_CLI_CYAN,
+            expand=False,
+            padding=(1, 2),
+        )
+    )
+
+
+# ============================================================
+# 旧版 _print_welcome_info（已废弃）
+# ============================================================
+
+
+def _print_welcome_info_old(name: str, model: str) -> None:
     """
     打印欢迎信息 ⭐ Stage 11 rich 美化版
 
