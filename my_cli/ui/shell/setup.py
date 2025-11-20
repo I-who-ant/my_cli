@@ -18,13 +18,15 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, NamedTuple
 
+import aiohttp
 from prompt_toolkit import PromptSession
 from prompt_toolkit.shortcuts.choice_input import ChoiceInput
 from pydantic import SecretStr
 
-from my_cli.config import LLMModel, LLMProvider, MoonshotSearchConfig, Services, load_config, save_config
+from my_cli.config import LLMModel, LLMProvider, MoonshotSearchConfig, load_config, save_config
 from my_cli.ui.shell.console import console
 from my_cli.ui.shell.metacmd import meta_command
+from my_cli.utils.aiohttp import new_client_session
 
 if TYPE_CHECKING:
     from my_cli.ui.shell import ShellApp
@@ -69,39 +71,27 @@ _PLATFORMS = [
 
 
 class _SetupResult(NamedTuple):
-    """配置结果"""
+    """配置结果 ⭐ 对齐官方"""
 
+    platform: _Platform
     api_key: SecretStr
-    model_name: str
-    base_url: str
-    provider_name: str  # ⭐ 添加provider名称
-    max_context_size: int  # ⭐ 添加max_context_size
+    model_id: str
+    max_context_size: int
 
 
 @meta_command
 async def setup(app: "ShellApp", args: list[str]):
     """
-    交互式配置 MyCLI ⭐ Stage 19.2 简化版
+    交互式配置 MyCLI ⭐ 完全对齐官方实现
 
-    流程：
-    1. 输入 API Key
-    2. 输入模型名称
-    3. 输入 Base URL
-    4. 保存到 ~/.mc/config.json
-    5. Reload 重新加载
-
-    官方完整流程：
+    官方流程：
     1. 选择平台（Kimi For Coding / Moonshot CN / Moonshot AI）
     2. 输入 API Key
-    3. 自动拉取可用模型列表（API 调用）
-    4. 选择模型
-    5. 保存配置
-    6. Reload
-
-    简化版（Stage 19.2）：
-    - 跳过平台选择
-    - 跳过模型列表拉取
-    - 手动输入所有配置
+    3. 自动拉取可用模型列表（API 调用）⭐ 关键改进
+    4. 选择模型（从列表中）⭐ 关键改进
+    5. 自动读取模型的 context_length ⭐ 关键改进
+    6. 保存配置
+    7. Reload
 
     对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/setup.py:50-84
     """
@@ -110,34 +100,32 @@ async def setup(app: "ShellApp", args: list[str]):
     result = await _setup()
     if not result:
         # 用户取消或错误
-        console.print("[yellow]配置已取消[/yellow]")
         return
 
     # 加载现有配置
     config = load_config()
 
-    # 添加 Provider（使用用户提供的名称）⭐
-    config.providers[result.provider_name] = LLMProvider(
+    # 添加 Provider
+    config.providers[result.platform.id] = LLMProvider(
         type="kimi",
-        base_url=result.base_url,
+        base_url=result.platform.base_url,
         api_key=result.api_key,
     )
 
-    # 添加 Model（使用用户提供的max_context_size）⭐
-    config.models[result.model_name] = LLMModel(
-        provider=result.provider_name,
-        model=result.model_name,
+    # 添加 Model
+    config.models[result.model_id] = LLMModel(
+        provider=result.platform.id,
+        model=result.model_id,
         max_context_size=result.max_context_size,
     )
 
     # 设置为默认模型
-    config.default_model = result.model_name
+    config.default_model = result.model_id
 
-    # ⭐ Stage 21.2: 如果平台有 search_url，自动配置 moonshot_search
-    platform = next((p for p in _PLATFORMS if p.id == result.provider_name), None)
-    if platform and platform.search_url:
+    # ⭐ 如果平台有 search_url，自动配置 moonshot_search
+    if result.platform.search_url:
         config.services.moonshot_search = MoonshotSearchConfig(
-            base_url=platform.search_url,
+            base_url=result.platform.search_url,
             api_key=result.api_key,  # 复用同一个 API Key
         )
 
@@ -156,112 +144,122 @@ async def setup(app: "ShellApp", args: list[str]):
 
 async def _setup() -> _SetupResult | None:
     """
-    交互式配置流程 ⭐ Stage 19.3
+    交互式配置流程 ⭐ 完全对齐官方实现
 
-    流程更新：
-    1. 选择平台（使用 button_dialog）
+    流程：
+    1. 选择平台
     2. 输入 API Key
-    3. 输入模型名称
-    4. 输入 max_context_size
+    3. 调用 API 拉取模型列表 ⭐ 关键改进
+    4. 从列表中选择模型 ⭐ 关键改进
+    5. 返回配置结果（包含 context_length）⭐ 关键改进
 
     Returns:
-        _SetupResult | None: 配置结果，None 表示用户取消
+        _SetupResult | None: 配置结果，None 表示用户取消或失败
 
     对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/setup.py:94-159
     """
-    # 1. 选择平台 ⭐ Stage 19.3
-    platform = await _prompt_platform()
-    if not platform:
+    # 1. 选择平台
+    platform_name = await _prompt_choice(
+        header="Select the API platform",
+        choices=[platform.name for platform in _PLATFORMS],
+    )
+    if not platform_name:
+        console.print("[red]未选择平台[/red]")
         return None
 
-    console.print(f"\n[green]✓[/green] 已选择: {platform.name}\n")
+    platform = next(p for p in _PLATFORMS if p.name == platform_name)
 
     # 2. 输入 API Key
-    api_key = await _prompt_text("API Key", is_password=True)
+    api_key = await _prompt_text("Enter your API key", is_password=True)
     if not api_key:
         return None
 
-    # 3. 输入模型名称
-    model_name = await _prompt_text(
-        "模型名称",
-        default="moonshot-v1-8k",
-    )
-    if not model_name:
-        return None
-
-    # 4. 输入 max_context_size
-    max_context_size_str = await _prompt_text(
-        "Max Context Size",
-        default="128000",
-    )
-    if not max_context_size_str:
-        return None
-
+    # 3. 调用 API 拉取模型列表 ⭐ 关键改进
+    models_url = f"{platform.base_url}/models"
     try:
-        max_context_size = int(max_context_size_str)
-    except ValueError:
-        console.print("[red]错误：Max Context Size 必须是数字[/red]")
+        async with (
+            new_client_session() as session,
+            session.get(
+                models_url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                },
+                raise_for_status=True,
+            ) as response,
+        ):
+            resp_json = await response.json()
+    except aiohttp.ClientError as e:
+        console.print(f"[red]获取模型列表失败: {e}[/red]")
         return None
 
+    model_dict = {model["id"]: model for model in resp_json["data"]}
+
+    # 4. 过滤模型（根据 allowed_prefixes）
+    model_ids: list[str] = [model["id"] for model in resp_json["data"]]
+    if platform.allowed_prefixes is not None:
+        model_ids = [
+            model_id
+            for model_id in model_ids
+            if model_id.startswith(tuple(platform.allowed_prefixes))
+        ]
+
+    if not model_ids:
+        console.print("[red]该平台没有可用模型[/red]")
+        return None
+
+    # 5. 选择模型 ⭐ 关键改进
+    model_id = await _prompt_choice(
+        header="Select the model",
+        choices=model_ids,
+    )
+    if not model_id:
+        console.print("[red]未选择模型[/red]")
+        return None
+
+    model = model_dict[model_id]
+
+    # 6. 返回配置结果（自动读取 context_length）⭐ 关键改进
     return _SetupResult(
+        platform=platform,
         api_key=SecretStr(api_key),
-        model_name=model_name,
-        base_url=platform.base_url,  # ⭐ 使用平台的 base_url
-        provider_name=platform.id,  # ⭐ 使用平台的 id
-        max_context_size=max_context_size,
+        model_id=model_id,
+        max_context_size=model["context_length"],  # ⭐ 从 API 响应中读取
     )
 
 
-async def _prompt_platform() -> _Platform | None:
+async def _prompt_choice(*, header: str, choices: list[str]) -> str | None:
     """
-    平台选择对话框 ⭐ Stage 19.3
+    选择菜单 ⭐ 对齐官方实现
 
-    使用 ChoiceInput 实现官方的选择菜单：
-    Select the API platform
-    > 1. Kimi For Coding
-      2. Moonshot AI 开放平台 (moonshot.cn)
-      3. Moonshot AI Open Platform (moonshot.ai)
+    Args:
+        header: 提示标题
+        choices: 选项列表
 
     Returns:
-        _Platform | None: 选择的平台，None 表示用户取消
+        str | None: 选中的选项，None 表示用户取消
 
     对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/setup.py:162-173
     """
-    try:
-        # ✅ 官方方式：choices 是纯字符串列表
-        platform_names = [platform.name for platform in _PLATFORMS]
-
-        # ✅ ChoiceInput 的 options 是 (name, name)，显示和返回值相同
-        selected_name = await ChoiceInput(
-            message="Select the API platform",
-            options=[(name, name) for name in platform_names],
-            default=platform_names[0],
-        ).prompt_async()
-
-        # ✅ 根据名称查找平台对象
-        for platform in _PLATFORMS:
-            if platform.name == selected_name:
-                return platform
-
+    if not choices:
         return None
 
+    try:
+        return await ChoiceInput(
+            message=header,
+            options=[(choice, choice) for choice in choices],
+            default=choices[0],
+        ).prompt_async()
     except (EOFError, KeyboardInterrupt):
         return None
 
 
-async def _prompt_text(
-    prompt: str,
-    *,
-    is_password: bool = False,
-    default: str | None = None,
-) -> str | None:
+async def _prompt_text(prompt: str, *, is_password: bool = False) -> str | None:
     """
-    交互式文本输入 ⭐ Stage 19.2
+    文本输入 ⭐ 对齐官方实现
 
     Args:
         prompt: 提示文本
         is_password: 是否为密码输入（隐藏输入内容）
-        default: 默认值
 
     Returns:
         str | None: 用户输入，None 表示用户取消
@@ -269,27 +267,13 @@ async def _prompt_text(
     对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/setup.py:176-186
     """
     session = PromptSession()
-
-    # 构建提示文本
-    prompt_text = f" {prompt}"
-    if default:
-        prompt_text += f" (默认: {default})"
-    prompt_text += ": "
-
     try:
-        result = str(
+        return str(
             await session.prompt_async(
-                prompt_text,
+                f" {prompt}: ",
                 is_password=is_password,
             )
         ).strip()
-
-        # 如果用户没有输入，使用默认值
-        if not result and default:
-            return default
-
-        return result if result else None
-
     except (EOFError, KeyboardInterrupt):
         return None
 
