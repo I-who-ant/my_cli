@@ -44,7 +44,7 @@ from rich.text import Text
 from my_cli.soul import LLMNotSet, RunCancelled, run_soul
 from my_cli.ui.shell.console import console
 from my_cli.ui.shell.metacmd import get_meta_command
-from my_cli.ui.shell.prompt import CustomPromptSession, UserInput
+from my_cli.ui.shell.prompt import CustomPromptSession, PromptMode, UserInput
 from my_cli.ui.shell.visualize import visualize
 
 __all__ = ["ShellApp", "WelcomeInfoItem"]
@@ -133,6 +133,11 @@ class ShellApp:
                         console.print("[yellow]👋 再见！[/yellow]")
                         break
 
+                    # ⭐ Stage 19.4: Shell 模式处理
+                    if user_input.mode == PromptMode.SHELL:
+                        await self._run_shell_command(user_input.command)
+                        continue
+
                     # Stage 11：斜杠命令处理 ⭐
                     if user_input.command.startswith("/"):
                         await self._run_meta_command(user_input.command[1:])
@@ -172,6 +177,45 @@ class ShellApp:
         except Exception as e:
             console.print(f"\n[red]❌ 错误: {e}[/red]\n")
             return False
+
+    async def _run_shell_command(self, command: str) -> None:
+        """
+        运行 Shell 命令（直接执行系统命令）⭐ Stage 19.4
+
+        在 Shell 模式下（Ctrl+X 切换），用户输入会直接作为系统命令执行。
+
+        Args:
+            command: 要执行的 Shell 命令
+
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:95-130
+        """
+        import shlex
+
+        if not command.strip():
+            return
+
+        # 检查 cd 命令（目录切换不会跨命令保持）
+        stripped_cmd = command.strip()
+        try:
+            split_cmd = shlex.split(stripped_cmd)
+            if len(split_cmd) >= 1 and split_cmd[0] == "cd":
+                console.print(
+                    "[yellow]⚠️  注意：目录切换不会跨命令保持[/yellow]"
+                )
+                return
+        except ValueError:
+            pass  # shlex 解析失败，继续执行
+
+        # 执行命令
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=None,  # 直接输出到终端
+                stderr=None,
+            )
+            await proc.wait()
+        except Exception as e:
+            console.print(f"[red]❌ Shell 命令执行失败: {e}[/red]")
 
     async def _run_meta_command(self, command_name: str) -> None:
         """
