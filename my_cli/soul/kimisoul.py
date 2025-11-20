@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -32,11 +33,30 @@ from my_cli.soul.agent import Agent
 from my_cli.soul.context import Context
 from my_cli.soul.message import check_message, system, tool_result_to_message
 from my_cli.soul.runtime import Runtime
+from my_cli.utils.logging import logger
 from my_cli.wire.message import StepBegin
 from my_cli.soul import LLMNotSupported
 
 if TYPE_CHECKING:
     from my_cli.soul import wire_send, StatusSnapshot  # 避免循环导入，仅用于类型提示
+
+
+class BackToTheFuture(Exception):
+    """时间旅行异常 ⭐ Stage 19
+
+    当 D-Mail 被发送时抛出，触发 Context 回滚到指定检查点。
+    主 Agent 循环会捕获此异常并处理回滚逻辑。
+
+    Attributes:
+        checkpoint_id: 目标检查点 ID
+        messages: 要添加到目标检查点的消息列表
+
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py（在文件内定义）
+    """
+
+    def __init__(self, checkpoint_id: int, messages: Sequence[Message]):
+        self.checkpoint_id = checkpoint_id
+        self.messages = messages
 
 
 class KimiSoul:
@@ -532,6 +552,53 @@ class KimiSoul:
     def context(self) -> Context:
         """获取 Context（只读）"""
         return self._context
+
+    async def compact_context(self) -> None:
+        """压缩 Context（减少 token 使用）⭐ Stage 19
+
+        流程：
+        1. 发送 CompactionBegin Wire 事件
+        2. 使用 SimpleCompaction 生成摘要
+        3. 替换旧消息为摘要
+        4. 发送 CompactionEnd Wire 事件
+
+        对应源码：kimi-cli-fork/src/kimi_cli/soul/kimisoul.py（参考文档）
+        """
+        from my_cli.soul.compaction import SimpleCompaction
+        from my_cli.soul import wire_send
+        from my_cli.wire.message import CompactionBegin, CompactionEnd
+
+        # 1. 检查 LLM 是否可用
+        if not self._runtime.llm:
+            logger.warning("LLM not available, skipping compaction")
+            return
+
+        # 2. 发送开始事件
+        wire_send(CompactionBegin())
+
+        try:
+            # 3. 使用 SimpleCompaction 压缩
+            compaction = SimpleCompaction()
+            compacted_messages = await compaction.compact(
+                messages=self._context.history,
+                llm=self._runtime.llm,
+            )
+
+            # 4. 替换 Context 中的消息
+            # 清空现有历史
+            self._context._history.clear()
+
+            # 添加压缩后的消息
+            for msg in compacted_messages:
+                self._context._history.append(msg)
+
+            logger.info("Context compacted: {before} -> {after} messages",
+                       before=len(self._context.history),
+                       after=len(compacted_messages))
+
+        finally:
+            # 5. 发送结束事件
+            wire_send(CompactionEnd())
 
 
 
