@@ -157,9 +157,13 @@ class ShellApp:
                     break
 
                 except Exception as e:
+                    # ⭐ 对齐官方：Reload 需要向上传播
+                    from my_cli.cli import Reload
+                    if isinstance(e, Reload):
+                        raise
+
                     # 其他错误：打印错误但继续循环
                     console.print(f"\n[red]❌ 未知错误: {e}[/red]\n")
-                    # TODO: Stage 19+ 添加 verbose 模式支持
                     import traceback
                     traceback.print_exc()
                     continue
@@ -246,15 +250,22 @@ class ShellApp:
             if asyncio.iscoroutine(result):
                 await result
         except Exception as e:
-            # ⭐ 特殊处理：Reload 异常需要向上传播
+            # ⭐ 对齐官方：使用独立的 Reload 处理子句
             from my_cli.cli import Reload
-            if isinstance(e, Reload):
-                raise  # 向上传播，由 cli.py 的 while 循环捕获
+            from my_cli.exception import LLMNotSet, ChatProviderError
 
-            console.print(f"[red]❌ 命令执行失败: {e}[/red]")
-            # TODO: Stage 19+ 添加 verbose 模式支持
-            import traceback
-            traceback.print_exc()
+            # 重新检查异常类型，使用官方模式
+            if isinstance(e, LLMNotSet):
+                console.print("[red]LLM 未设置，请使用 /setup 配置[/red]")
+            elif isinstance(e, ChatProviderError):
+                console.print(f"[red]LLM API 错误: {e}[/red]")
+            elif isinstance(e, Reload):
+                raise  # ⭐ 向上传播
+            else:
+                # 其他异常
+                console.print(f"[red]❌ 命令执行失败: {e}[/red]")
+                import traceback
+                traceback.print_exc()
 
     async def _run_soul_command(self, user_input: str) -> None:
         """
