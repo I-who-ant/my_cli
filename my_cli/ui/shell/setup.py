@@ -22,7 +22,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.shortcuts.choice_input import ChoiceInput
 from pydantic import SecretStr
 
-from my_cli.config import LLMModel, LLMProvider, load_config, save_config
+from my_cli.config import LLMModel, LLMProvider, MoonshotSearchConfig, Services, load_config, save_config
 from my_cli.ui.shell.console import console
 from my_cli.ui.shell.metacmd import meta_command
 
@@ -41,6 +41,8 @@ class _Platform(NamedTuple):
     id: str  # Provider ID
     name: str  # 显示名称
     base_url: str  # API Base URL
+    search_url: str | None = None  # ⭐ 搜索服务 URL（可选）
+    allowed_prefixes: list[str] | None = None  # ⭐ 允许的模型前缀
 
 
 # 支持的平台列表
@@ -49,16 +51,19 @@ _PLATFORMS = [
         id="kimi-for-coding",
         name="Kimi For Coding",
         base_url="https://api.kimi.com/coding/v1",
+        search_url="https://api.kimi.com/coding/v1/search",  # ⭐ 有搜索服务
     ),
     _Platform(
         id="moonshot-cn",
         name="Moonshot AI 开放平台 (moonshot.cn)",
         base_url="https://api.moonshot.cn/v1",
+        allowed_prefixes=["kimi-k2-"],  # ⭐ 只允许 kimi-k2-* 模型
     ),
     _Platform(
         id="moonshot-ai",
         name="Moonshot AI Open Platform (moonshot.ai)",
         base_url="https://api.moonshot.ai/v1",
+        allowed_prefixes=["kimi-k2-"],  # ⭐ 只允许 kimi-k2-* 模型
     ),
 ]
 
@@ -127,6 +132,14 @@ async def setup(app: "ShellApp", args: list[str]):
 
     # 设置为默认模型
     config.default_model = result.model_name
+
+    # ⭐ Stage 21.2: 如果平台有 search_url，自动配置 moonshot_search
+    platform = next((p for p in _PLATFORMS if p.id == result.provider_name), None)
+    if platform and platform.search_url:
+        config.services.moonshot_search = MoonshotSearchConfig(
+            base_url=platform.search_url,
+            api_key=result.api_key,  # 复用同一个 API Key
+        )
 
     # 保存配置
     save_config(config)
