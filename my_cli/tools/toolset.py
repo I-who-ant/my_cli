@@ -19,7 +19,9 @@ from kosong.tooling import CallableTool2, Tool, ToolResult, ToolResultFuture, Ha
 
 from my_cli.tools.bash import Bash
 from my_cli.tools.file import ReadFile, WriteFile
-from my_cli.tools.think import Think  # ⭐ Stage 21: 导入 Think 工具
+from my_cli.tools.think import Think  # ⭐ Stage 21.1: 导入 Think 工具
+from my_cli.tools.web import WebSearch, WebFetch  # ⭐ Stage 21.2: 导入 Web 工具
+from my_cli.tools.todo import SetTodoList  # ⭐ Stage 21.3: 导入 Todo 工具
 
 __all__ = ["SimpleToolset"]
 
@@ -47,7 +49,10 @@ class SimpleToolset:
             "Bash": Bash(),
             "ReadFile": ReadFile(),
             "WriteFile": WriteFile(),
-            "Think": Think(),  # ⭐ Stage 21: 注册 Think 工具
+            "Think": Think(),  # ⭐ Stage 21.1: 注册 Think 工具
+            "WebSearch": WebSearch(),  # ⭐ Stage 21.2: 注册 WebSearch 工具
+            "WebFetch": WebFetch(),  # ⭐ Stage 21.2: 注册 WebFetch 工具
+            "SetTodoList": SetTodoList(),  # ⭐ Stage 21.3: 注册 SetTodoList 工具
         }
 
     @property
