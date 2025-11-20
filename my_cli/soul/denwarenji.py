@@ -123,20 +123,13 @@ class DenwaRenji:
 
         对应源码：kimi-cli-fork/src/kimi_cli/soul/denwarenji.py:21-28
         """
-        # ============================================================
-        # TODO: Stage 19 完整实现（参考官方）
-        # ============================================================
-        # 官方实现：
-        #
-        # if self._pending_dmail is not None:
-        #     raise DenwaRenjiError("Only one D-Mail can be sent at a time")
-        # if dmail.checkpoint_id < 0:
-        #     raise DenwaRenjiError("The checkpoint ID can not be negative")
-        # if dmail.checkpoint_id >= self._n_checkpoints:
-        #     raise DenwaRenjiError("There is no checkpoint with the given ID")
-        # self._pending_dmail = dmail
-        # ============================================================
-        pass  # 简化版（Stage 8-18）：不实现
+        if self._pending_dmail is not None:
+            raise DenwaRenjiError("Only one D-Mail can be sent at a time")
+        if dmail.checkpoint_id < 0:
+            raise DenwaRenjiError("The checkpoint ID can not be negative")
+        if dmail.checkpoint_id >= self._n_checkpoints:
+            raise DenwaRenjiError("There is no checkpoint with the given ID")
+        self._pending_dmail = dmail
 
     def set_n_checkpoints(self, n_checkpoints: int):
         """
@@ -149,13 +142,7 @@ class DenwaRenji:
 
         对应源码：kimi-cli-fork/src/kimi_cli/soul/denwarenji.py:30-32
         """
-        # ============================================================
-        # TODO: Stage 19 完整实现（参考官方）
-        # ============================================================
-        # 官方实现：
-        # self._n_checkpoints = n_checkpoints
-        # ============================================================
-        pass  # 简化版（Stage 8-18）：不实现
+        self._n_checkpoints = n_checkpoints
 
     def fetch_pending_dmail(self) -> DMail | None:
         """
@@ -168,30 +155,6 @@ class DenwaRenji:
 
         对应源码：kimi-cli-fork/src/kimi_cli/soul/denwarenji.py:34-37
         """
-        # ============================================================
-        # TODO: Stage 19 完整实现（参考官方）
-        # ============================================================
-        # 官方实现：
-        # pending_dmail = self._pending_dmail
-        # self._pending_dmail = None
-        # return pending_dmail
-        # ============================================================
-        return None  # 简化版（Stage 8-18）：永远返回 None
-
-
-# ============================================================
-# TODO: Stage 19+ 完整功能（参考官方）
-# ============================================================
-# 官方参考：kimi-cli-fork/src/kimi_cli/soul/denwarenji.py
-#
-# Stage 19（DenwaRenji 系统）需要：
-# 1. 在 KimiSoul.__init__() 中创建 DenwaRenji 实例
-# 2. 在 _checkpoint() 中调用 set_n_checkpoints()
-# 3. 在 _step() 中调用 fetch_pending_dmail()
-# 4. 如果有待处理的 D-Mail，抛出 BackToTheFuture 异常
-# 5. 在 run() 中捕获 BackToTheFuture 异常并回滚
-#
-# Stage 20+ 扩展：
-# - 支持恢复文件系统状态到 Checkpoint
-# - SendDMail 工具实现（在 tools/ 目录）
-# ============================================================
+        pending_dmail = self._pending_dmail
+        self._pending_dmail = None
+        return pending_dmail

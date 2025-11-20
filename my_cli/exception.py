@@ -61,20 +61,27 @@ class AgentSpecError(KimiCLIException):
 
 
 # ============================================================
-# TODO: Stage 19+ 新增异常（参考官方）
+# Stage 19：时间旅行异常 ⭐
 # ============================================================
-# 官方参考：kimi-cli-fork/src/kimi_cli/exception.py
-#
-# Stage 19（时间旅行）需要：
-#
-# from collections.abc import Sequence
-# from kosong.message import Message
-#
-# class BackToTheFuture(Exception):
-#     """时间旅行异常（D-Mail 触发的 Checkpoint 回滚）"""
-#
-#     def __init__(self, checkpoint_id: int, messages: Sequence[Message]):
-#         self.checkpoint_id = checkpoint_id
-#         self.messages = messages
-#         super().__init__(f"Back to checkpoint {checkpoint_id}")
-# ============================================================
+
+from collections.abc import Sequence
+
+from kosong.message import Message
+
+
+class BackToTheFuture(Exception):
+    """时间旅行异常 ⭐ Stage 19
+
+    当 D-Mail 被发送时抛出，触发 Context 回滚到指定检查点。
+
+    Attributes:
+        checkpoint_id: 目标检查点 ID
+        messages: 要添加到目标检查点的消息列表
+
+    对应源码：kimi-cli-fork/src/kimi_cli/exception.py（未找到官方实现，参考文档）
+    """
+
+    def __init__(self, checkpoint_id: int, messages: Sequence[Message]):
+        self.checkpoint_id = checkpoint_id
+        self.messages = messages
+        super().__init__(f"Back to checkpoint {checkpoint_id}")
