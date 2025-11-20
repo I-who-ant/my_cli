@@ -5,18 +5,80 @@
 
 ---
 
+## ⚠️ 重大重构说明（2025-11-20）
+
+### 重构原因
+
+初版实现（commit: 7a17637）使用了简化方案：
+- WebSearch：使用 DuckDuckGo（无需配置）
+- WebFetch：直接使用 aiohttp
+
+**用户反馈**：需要完全对齐官方实现，以便后续跟进和维护。
+
+### 重构内容（commit: a79058a）
+
+#### 1. 工具重命名
+| 原名称 | 新名称 | 原因 |
+|--------|--------|------|
+| WebSearch | **SearchWeb** | 与官方一致 |
+| WebFetch | **FetchURL** | 与官方一致 |
+
+#### 2. SearchWeb 重写
+- ❌ **移除**: DuckDuckGo 实现
+- ✅ **新增**: Moonshot Search API 集成
+- ✅ **新增**: Config 依赖（`config.services.moonshot_search`）
+- ✅ **新增**: SkipThisTool 处理（配置缺失时跳过）
+- ✅ **新增**: get_current_tool_call_or_none()（传递 tool_call_id）
+
+#### 3. FetchURL 重构
+- ✅ **优化**: 使用 new_client_session()（SSL 验证）
+- ✅ **优化**: 使用 ToolResultBuilder（输出管理）
+- ✅ **保留**: trafilatura 内容提取
+
+#### 4. 基础设施
+- ✅ **新增**: `my_cli/utils/aiohttp.py`（客户端封装）
+- ✅ **修改**: `SimpleToolset.__init__(config: Config)`（接收配置）
+- ✅ **修改**: `tools/__init__.py`（移除 WebSearch/WebFetch case）
+
+### 配置要求
+
+**~/.mc/config.json**:
+```json
+{
+  "services": {
+    "moonshot_search": {
+      "base_url": "https://api.moonshot.cn/v1/web/search",
+      "api_key": "sk-..."
+    }
+  }
+}
+```
+
+### 对比总结
+
+| 方面 | 初版实现 | 重构后 | 优势 |
+|------|---------|--------|------|
+| **命名** | WebSearch, WebFetch | SearchWeb, FetchURL | ✅ 官方一致 |
+| **SearchWeb** | DuckDuckGo | Moonshot Search API | ✅ 官方服务 |
+| **Config 集成** | ❌ | ✅ | ✅ 配置化 |
+| **SkipThisTool** | ❌ | ✅ | ✅ 优雅降级 |
+| **ToolResultBuilder** | ❌ | ✅ | ✅ 输出管理 |
+| **tool_call_id** | ❌ | ✅ | ✅ Soul 层集成 |
+
+---
+
 ## 📋 功能概览
 
 Stage 21 实现了三组**实用工具**，大幅提升 Agent 的能力和用户体验：
 
 ### 核心功能
 - ✅ **Think 工具**：让 Agent 展示思考过程，提升透明度
-- ✅ **Web 工具**：WebSearch（搜索）+ WebFetch（抓取网页内容）
+- ✅ **Web 工具**：SearchWeb（Moonshot Search）+ FetchURL（抓取网页内容）
 - ✅ **Todo 工具**：SetTodoList（任务列表管理）
 
 ### 设计原则
-1. **简单易用**：最小化参数，专注核心功能
-2. **无需配置**：尽量使用无需 API Key 的服务
+1. **官方对齐**：严格匹配官方实现（命名、接口、行为）
+2. **配置化**：支持通过 Config 灵活配置
 3. **错误友好**：清晰的错误信息和降级处理
 4. **类型安全**：完整的 Pydantic 验证
 
