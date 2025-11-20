@@ -546,6 +546,231 @@ except Exception as e:
 
 ---
 
+## 🔧 完善的异常处理（追加修复）
+
+### 问题发现
+
+在修复 `_run_meta_command` 的 Reload 异常处理后，发现还有其他地方也可能捕获 Reload 异常：
+
+1. **主循环** (line 159) - `except Exception as e`
+2. **_run_single_command** (line 177) - `except Exception as e`
+3. **_run_soul_command** (line 288) - `except Exception as e`
+
+### 官方异常处理模式
+
+**文件**: `kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:150-169`
+
+```python
+try:
+    ret = command.func(self, command_args)
+    if isinstance(ret, Awaitable):
+        await ret
+except LLMNotSet:
+    logger.error("LLM not set")
+    console.print("[red]LLM not set, send /setup to configure[/red]")
+except ChatProviderError as e:
+    logger.exception("LLM provider error:")
+    console.print(f"[red]LLM provider error: {e}[/red]")
+except asyncio.CancelledError:
+    logger.info("Interrupted by user")
+    console.print("[red]Interrupted by user[/red]")
+except Reload:
+    # ⭐ 关键：独立的 Reload 处理子句
+    # just propagate
+    raise
+except BaseException as e:  # ⭐ 使用 BaseException 而不是 Exception
+    logger.exception("Unknown error:")
+    console.print(f"[red]Unknown error: {e}[/red]")
+    raise  # re-raise unknown error
+```
+
+**关键点**：
+1. ✅ 使用**独立的 `except Reload:` 子句**
+2. ✅ 最后使用 `except BaseException` 而不是 `Exception`
+3. ✅ 特定异常有专门的处理（LLMNotSet, ChatProviderError）
+4. ✅ 所有未知错误都 `raise` 重新抛出
+
+### 最终修复方案
+
+#### 1. 主循环异常处理
+
+**位置**: `my_cli/ui/shell/__init__.py:159-169`
+
+```python
+except Exception as e:
+    # ⭐ 对齐官方：Reload 需要向上传播
+    from my_cli.cli import Reload
+    if isinstance(e, Reload):
+        raise
+
+    # 其他错误：打印错误但继续循环
+    console.print(f"\n[red]❌ 未知错误: {e}[/red]\n")
+    import traceback
+    traceback.print_exc()
+    continue
+```
+
+#### 2. _run_meta_command 异常处理
+
+**位置**: `my_cli/ui/shell/__init__.py:253-269`
+
+```python
+except Exception as e:
+    # ⭐ 对齐官方：使用独立的 Reload 处理子句
+    from my_cli.cli import Reload
+    from my_cli.exception import LLMNotSet, ChatProviderError
+
+    # 重新检查异常类型，使用官方模式
+    if isinstance(e, LLMNotSet):
+        console.print("[red]LLM 未设置，请使用 /setup 配置[/red]")
+    elif isinstance(e, ChatProviderError):
+        console.print(f"[red]LLM API 错误: {e}[/red]")
+    elif isinstance(e, Reload):
+        raise  # ⭐ 向上传播
+    else:
+        # 其他异常
+        console.print(f"[red]❌ 命令执行失败: {e}[/red]")
+        import traceback
+        traceback.print_exc()
+```
+
+### 异常处理最佳实践（扩展）
+
+#### 1. 为什么官方使用独立的 except 子句？
+
+**优势**：
+- **可读性**：每个异常类型的处理逻辑清晰分离
+- **可维护性**：添加新异常类型时只需新增子句
+- **性能**：Python 的 except 子句匹配是线性的，顺序很重要
+
+**示例对比**：
+
+```python
+# ❌ 不推荐：在一个 except 中检查多个类型
+except Exception as e:
+    if isinstance(e, Reload):
+        raise
+    elif isinstance(e, LLMNotSet):
+        ...
+    elif isinstance(e, ChatProviderError):
+        ...
+    else:
+        ...
+
+# ✅ 推荐：使用独立的 except 子句
+except LLMNotSet:
+    ...
+except ChatProviderError as e:
+    ...
+except Reload:
+    raise
+except BaseException as e:
+    ...
+    raise
+```
+
+#### 2. Exception vs BaseException
+
+**异常层次**：
+```
+BaseException
+├── SystemExit
+├── KeyboardInterrupt
+├── GeneratorExit
+└── Exception
+    ├── Reload  (自定义)
+    ├── LLMNotSet  (自定义)
+    ├── ChatProviderError  (自定义)
+    └── ...
+```
+
+**使用场景**：
+- `except Exception`: 捕获大多数异常，**不包括** SystemExit/KeyboardInterrupt
+- `except BaseException`: 捕获**所有**异常，包括系统级异常
+
+**官方选择 `BaseException` 的原因**：
+- 确保捕获所有未知异常
+- 配合 `raise` 重新抛出，不会吞掉异常
+- 允许 SystemExit/KeyboardInterrupt 正常工作
+
+#### 3. 异常传播路径
+
+```
+用户输入 "/setup"
+    ↓
+主循环 (line 127-170)
+    ↓
+_run_meta_command (line 225-269)
+    ↓
+setup() 抛出 Reload
+    ↓
+_run_meta_command 检测到 Reload，raise
+    ↓
+主循环检测到 Reload，raise
+    ↓
+ShellApp.run() 向上传播
+    ↓
+app.py:run_shell_mode() 向上传播
+    ↓
+cli.py 的 while True 循环捕获
+    ↓
+continue - 重新运行 _run()
+```
+
+### Git 提交记录
+
+| 提交 | 哈希 | 内容 |
+|------|------|------|
+| 1 | `d97ac74` | 修复 Reload 异常被错误捕获（基础修复） |
+| 2 | `d6dc5dc` | 完善 Reload 异常处理，对齐官方模式（追加修复） |
+| 3 | `4989ced` | 修复异常导入位置（LLMNotSet/ChatProviderError） |
+
+### 异常导入位置说明
+
+**常见错误**：
+```python
+# ❌ 错误：从 my_cli.exception 导入
+from my_cli.exception import LLMNotSet, ChatProviderError
+```
+
+**正确导入**：
+```python
+# ✅ 正确：从各自定义位置导入
+from my_cli.soul import LLMNotSet           # Soul 相关异常
+from kosong.chat_provider import ChatProviderError  # kosong 库异常
+from my_cli.exception import ConfigError    # 配置相关异常
+```
+
+**异常定义位置总结**：
+
+| 异常 | 定义位置 | 用途 |
+|------|---------|------|
+| `LLMNotSet` | `my_cli.soul` | LLM 未配置 |
+| `RunCancelled` | `my_cli.soul` | 用户取消运行 |
+| `MaxStepsReached` | `my_cli.soul` | 达到最大步数 |
+| `ChatProviderError` | `kosong.chat_provider` | LLM API 错误 |
+| `ConfigError` | `my_cli.exception` | 配置文件错误 |
+| `AgentSpecError` | `my_cli.exception` | Agent 规范错误 |
+| `Reload` | `my_cli.cli` | 重新加载配置 |
+
+### 测试验证
+
+```bash
+# 1. 运行 /setup
+/setup
+
+# 2. 完成配置流程
+
+# 预期结果：
+# - 显示 "✓ MyCLI 配置完成！正在重新加载..."
+# - CLI 清屏
+# - 显示新的欢迎界面（使用新配置的模型）
+# - 无任何 "❌ 命令执行失败" 错误
+```
+
+---
+
 **生成时间**: 2025-01-20
+**更新时间**: 2025-01-20（追加异常处理完善内容 + 异常导入位置说明）
 **作者**: Claude（老王编程助手）
-**版本**: v1.0
+**版本**: v1.2
