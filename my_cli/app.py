@@ -148,18 +148,30 @@ class MyCLI:
         # 4. 创建 Runtime
         runtime = await Runtime.create(config, llm, session, yolo)
 
-        # 5. 加载 Agent 规范
-        # TODO: Stage 18+ 实现完整的 load_agent 函数
-        # if agent_file is None:
-        #     agent_file = DEFAULT_AGENT_FILE
-        # from my_cli.soul.agent import load_agent
-        # agent = await load_agent(agent_file, runtime, mcp_configs=mcp_configs or [])
-        # 临时使用简化实现
-        from my_cli.soul.agent import Agent
-        agent = Agent(
-            name="MyCLI Assistant",
-            work_dir=runtime.session.work_dir,
-        )
+        # 5. 加载 Agent 规范 ⭐ Stage 26 完整实现
+        from my_cli.agentspec import DEFAULT_AGENT_FILE
+        from my_cli.soul.agent import load_agent
+
+        if agent_file is None:
+            agent_file = DEFAULT_AGENT_FILE
+
+        try:
+            agent = await load_agent(
+                agent_file, runtime, mcp_configs=mcp_configs or []
+            )
+            logger.info(f"Loaded agent: {agent.name}")
+        except Exception as e:
+            # 如果加载失败，使用简化版 Agent
+            logger.warning(f"Failed to load agent from {agent_file}: {e}")
+            logger.info("Using fallback agent")
+            from my_cli.soul.agent import Agent
+            from my_cli.soul.toolset import CustomToolset
+
+            agent = Agent(
+                name="MyCLI Assistant",
+                system_prompt="You are an AI assistant.",
+                toolset=CustomToolset(),
+            )
 
         # 6. 创建并恢复 Context
         context = Context(session.history_file)
