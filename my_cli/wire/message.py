@@ -29,9 +29,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import uuid
+from enum import Enum
+from typing import Any
+
 from kosong.message import ContentPart, ToolCall, ToolCallPart
 from kosong.tooling import ToolResult
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ⭐ 官方实现：直接导入 StatusSnapshot（不使用 TYPE_CHECKING）
 # 参考：kimi-cli-fork/src/kimi_cli/wire/message.py:13
@@ -90,15 +95,135 @@ class StatusUpdate(BaseModel):
 
 
 # ============================================================
+# Stage 28：Compaction 消息 ⭐
+# ============================================================
+
+
+class CompactionBegin(BaseModel):
+    """
+    Context 压缩开始事件 ⭐ Stage 28
+
+    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:32-40
+    """
+
+    pass
+
+
+class CompactionEnd(BaseModel):
+    """
+    Context 压缩结束事件 ⭐ Stage 28
+
+    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:43-49
+    """
+
+    pass
+
+
+# ============================================================
+# Stage 28：SubagentEvent 消息 ⭐
+# ============================================================
+
+
+class SubagentEvent(BaseModel):
+    """
+    子 Agent 事件 ⭐ Stage 28
+
+    Task 工具的子 Agent 发送的事件，会被包装后转发给主 Wire。
+
+    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:57-62
+    """
+
+    task_tool_call_id: str
+    """关联的 Task 工具调用 ID"""
+
+    event: Event
+    """子 Agent 发送的事件"""
+
+
+# ============================================================
+# Stage 24：Approval 系统消息 ⭐
+# ============================================================
+
+
+class ApprovalResponse(Enum):
+    """
+    批准响应类型 ⭐ Stage 24
+
+    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:70-73
+    """
+
+    APPROVE = "approve"
+    """批准本次操作"""
+
+    APPROVE_FOR_SESSION = "approve_for_session"
+    """批准本次操作，并在本会话中自动批准相同操作"""
+
+    REJECT = "reject"
+    """拒绝操作"""
+
+
+class ApprovalRequest(BaseModel):
+    """
+    批准请求 ⭐ Stage 24
+
+    工具执行危险操作前发送给用户的确认请求。
+
+    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:76-106
+    """
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    """请求唯一 ID"""
+
+    tool_call_id: str
+    """关联的工具调用 ID"""
+
+    sender: str
+    """发送者名称（工具名称）"""
+
+    action: str
+    """操作名称（用于自动批准识别）"""
+
+    description: str
+    """操作描述（显示给用户）"""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._future: asyncio.Future[ApprovalResponse] = asyncio.Future()
+
+    async def wait(self) -> ApprovalResponse:
+        """
+        等待用户响应
+
+        Returns:
+            ApprovalResponse: 用户的批准/拒绝响应
+        """
+        return await self._future
+
+    def resolve(self, response: ApprovalResponse) -> None:
+        """
+        设置用户响应（由 UI 层调用）
+
+        Args:
+            response: 用户的响应
+        """
+        self._future.set_result(response)
+
+    @property
+    def resolved(self) -> bool:
+        """是否已响应"""
+        return self._future.done()
+
+
+# ============================================================
 # Stage 16：事件类型定义扩展 ⭐
 # ============================================================
 
-# 控制流事件（Stage 16 新增 StatusUpdate）
-type ControlFlowEvent = StepBegin | StepInterrupted | StatusUpdate  # ⭐ 新增 StatusUpdate
-"""控制流事件：步骤控制、状态更新等"""
+# 控制流事件（Stage 28 完整版）
+type ControlFlowEvent = StepBegin | StepInterrupted | CompactionBegin | CompactionEnd | StatusUpdate
+"""控制流事件：步骤控制、压缩、状态更新等"""
 
-# Event 联合类型（Stage 6-7-16）
-type Event = ControlFlowEvent | ContentPart | ToolCall | ToolCallPart | ToolResult
+# Event 联合类型（Stage 28 完整版）
+type Event = ControlFlowEvent | ContentPart | ToolCall | ToolCallPart | ToolResult | SubagentEvent
 """
 所有事件类型的联合
 
