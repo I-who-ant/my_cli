@@ -255,6 +255,124 @@ Stage 8+: 添加 ApprovalRequest（批准请求）
 
 
 # ============================================================
+# Stage 29：序列化函数 ⭐
+# ============================================================
+
+from collections.abc import Sequence
+from kosong.tooling import ToolOk
+
+
+def serialize_event(event: Event) -> dict[str, Any]:
+    """
+    将事件序列化为 JSON 字典 ⭐ Stage 29
+
+    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:109-154
+    """
+    match event:
+        case StepBegin():
+            return {"type": "step_begin", "payload": {"n": event.n}}
+        case StepInterrupted():
+            return {"type": "step_interrupted"}
+        case CompactionBegin():
+            return {"type": "compaction_begin"}
+        case CompactionEnd():
+            return {"type": "compaction_end"}
+        case StatusUpdate():
+            return {
+                "type": "status_update",
+                "payload": {"context_usage": event.status.context_usage},
+            }
+        case ContentPart():
+            return {
+                "type": "content_part",
+                "payload": event.model_dump(mode="json", exclude_none=True),
+            }
+        case ToolCall():
+            return {
+                "type": "tool_call",
+                "payload": event.model_dump(mode="json", exclude_none=True),
+            }
+        case ToolCallPart():
+            return {
+                "type": "tool_call_part",
+                "payload": event.model_dump(mode="json", exclude_none=True),
+            }
+        case ToolResult():
+            return {
+                "type": "tool_result",
+                "payload": serialize_tool_result(event),
+            }
+        case SubagentEvent():
+            return {
+                "type": "subagent_event",
+                "payload": {
+                    "task_tool_call_id": event.task_tool_call_id,
+                    "event": serialize_event(event.event),
+                },
+            }
+    # fallback
+    return {"type": "unknown", "payload": {}}
+
+
+def serialize_approval_request(request: ApprovalRequest) -> dict[str, Any]:
+    """
+    将 ApprovalRequest 序列化为 JSON 字典 ⭐ Stage 29
+
+    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:157-167
+    """
+    return {
+        "id": request.id,
+        "tool_call_id": request.tool_call_id,
+        "sender": request.sender,
+        "action": request.action,
+        "description": request.description,
+    }
+
+
+def serialize_tool_result(result: ToolResult) -> dict[str, Any]:
+    """
+    将 ToolResult 序列化为 JSON 字典 ⭐ Stage 29
+
+    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:170-189
+    """
+    if isinstance(result.result, ToolOk):
+        ok = True
+        result_data = {
+            "output": _serialize_tool_output(result.result.output),
+            "message": result.result.message,
+            "brief": result.result.brief,
+        }
+    else:
+        ok = False
+        result_data = {
+            "output": result.result.output,
+            "message": result.result.message,
+            "brief": result.result.brief,
+        }
+    return {
+        "tool_call_id": result.tool_call_id,
+        "ok": ok,
+        "result": result_data,
+    }
+
+
+def _serialize_tool_output(
+    output: str | ContentPart | Sequence[ContentPart],
+) -> str | list[Any] | dict[str, Any]:
+    """
+    序列化工具输出 ⭐ Stage 29
+
+    对应源码：kimi-cli-fork/src/kimi_cli/wire/message.py:192-200
+    """
+    if isinstance(output, str):
+        return output
+    elif isinstance(output, ContentPart):
+        return output.model_dump(mode="json", exclude_none=True)
+    else:  # Sequence[ContentPart]
+        return [part.model_dump(mode="json", exclude_none=True) for part in output]
+
+
+# ============================================================
 # TODO: Stage 7+ 完整消息类型（参考官方）
 # ============================================================
 # 官方参考：kimi-cli-fork/src/kimi_cli/wire/message.py:32-201
