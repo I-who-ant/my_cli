@@ -43,7 +43,7 @@ from rich.text import Text
 
 from my_cli.ui.shell.console import console
 from my_cli.wire import WireUISide
-from my_cli.wire.message import StepBegin, StepInterrupted
+from my_cli.wire.message import ApprovalRequest, ApprovalResponse, StepBegin, StepInterrupted
 
 __all__ = ["visualize"]
 
@@ -129,6 +129,10 @@ async def visualize(wire_ui: WireUISide) -> None:
                 tool_call_manager.finish_tool_call(msg)
                 _render_tool_result_to_text(msg, content_text)
                 live.update(content_text)
+
+            # ⭐ Stage 25：批准请求处理
+            elif isinstance(msg, ApprovalRequest):
+                await _handle_approval_request(msg, content_text, live)
 
             # 步骤中断：退出 UI Loop
             elif isinstance(msg, StepInterrupted):
@@ -250,3 +254,75 @@ class _ToolCallManager:
         # 刷新显示
         if self._live:
             self._live.update(self._text)
+
+
+# ============================================================
+# Stage 25：批准请求处理 ⭐
+# ============================================================
+
+
+async def _handle_approval_request(
+    request: ApprovalRequest, content_text: Text, live: Live
+) -> None:
+    """
+    处理批准请求 ⭐ Stage 25
+
+    当工具需要用户批准时（如执行危险操作），显示批准提示并等待用户输入。
+
+    Args:
+        request: 批准请求对象
+        content_text: 累积的 Text 对象
+        live: Live 渲染实例
+
+    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/visualize.py:212-261
+    """
+    from rich.panel import Panel
+
+    # 1. 在 Live 区域显示批准请求
+    content_text.append("\n")
+    content_text.append("⚠️ 批准请求\n", style="yellow bold")
+    content_text.append(f"   工具: ", style="grey50")
+    content_text.append(f"{request.sender}\n", style="blue")
+    content_text.append(f"   操作: ", style="grey50")
+    content_text.append(f"{request.description}\n", style="white")
+    content_text.append("\n")
+    content_text.append("   请选择:\n", style="grey50")
+    content_text.append("   [y] 批准本次\n", style="cyan")
+    content_text.append("   [a] 批准本会话所有同类操作\n", style="cyan")
+    content_text.append("   [n] 拒绝\n", style="cyan")
+    content_text.append("\n")
+    live.update(content_text)
+
+    # 2. 暂停 Live 渲染，获取用户输入
+    live.stop()
+
+    try:
+        # 使用简单的 input 获取用户选择
+        while True:
+            try:
+                choice = input("   你的选择 [y/a/n]: ").strip().lower()
+            except EOFError:
+                choice = "n"
+
+            if choice in ("y", "yes", "是"):
+                response = ApprovalResponse.APPROVE
+                content_text.append("   ✅ 已批准\n\n", style="green")
+                break
+            elif choice in ("a", "all", "全部"):
+                response = ApprovalResponse.APPROVE_FOR_SESSION
+                content_text.append("   ✅ 已批准（本会话自动批准同类操作）\n\n", style="green")
+                break
+            elif choice in ("n", "no", "否", ""):
+                response = ApprovalResponse.REJECT
+                content_text.append("   ❌ 已拒绝\n\n", style="red")
+                break
+            else:
+                print("   无效输入，请输入 y/a/n")
+
+        # 3. 调用 request.resolve() 返回响应
+        request.resolve(response)
+
+    finally:
+        # 4. 恢复 Live 渲染
+        live.start()
+        live.update(content_text)

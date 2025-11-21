@@ -58,13 +58,36 @@ from pydantic import SecretStr
 
 from my_cli.config import LLMModel, LLMProvider, load_config
 from my_cli.soul.agent import Agent
-# ⭐ 延迟导入 KimiSoul 以避免循环导入（官方做法）
-# from my_cli.soul.kimisoul import KimiSoul
-from my_cli.soul.runtime import Runtime
 from my_cli.wire import Wire, WireMessage, WireUISide
 
 if TYPE_CHECKING:
     from my_cli.llm import LLM, ModelCapability
+
+
+# ============================================================
+# StatusSnapshot 定义 ⭐ 必须在导入 Runtime 之前定义
+# ============================================================
+
+
+@dataclass(frozen=True, slots=True)
+class StatusSnapshot:
+    """
+    状态快照 - 记录 Soul 的运行状态
+
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:48-51
+    """
+
+    context_usage: float
+    """Context 使用率（百分比，0.0-1.0）"""
+
+
+# ============================================================
+# 导入 Runtime（依赖 StatusSnapshot）⭐
+# ============================================================
+
+# ⭐ 延迟导入 KimiSoul 以避免循环导入（官方做法）
+# from my_cli.soul.kimisoul import KimiSoul
+from my_cli.soul.runtime import Runtime  # noqa: E402
 
 __all__ = [
     # 核心接口和工厂
@@ -159,23 +182,6 @@ class RunCancelled(Exception):
     """
 
     pass
-
-
-# ============================================================
-# Stage 6：数据类定义 ✅
-# ============================================================
-
-
-@dataclass(frozen=True, slots=True)
-class StatusSnapshot:
-    """
-    状态快照 - 记录 Soul 的运行状态
-
-    对应源码：kimi-cli-fork/src/kimi_cli/soul/__init__.py:48-51
-    """
-
-    context_usage: float
-    """Context 使用率（百分比，0.0-1.0）"""
 
 
 # ============================================================

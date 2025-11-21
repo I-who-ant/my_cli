@@ -24,21 +24,33 @@ Shell UI Prompt 模块（输入处理）⭐ Stage 12 增强版
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import getpass
+import json
 import os
 import re
+from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from hashlib import md5
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
+from kosong.message import ContentPart, ImageURLPart, TextPart
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import Completer, Completion, merge_completers
+from prompt_toolkit.application import get_app_or_none
+from prompt_toolkit.completion import Completer, Completion, DummyCompleter, merge_completers
 from prompt_toolkit.document import Document
-from prompt_toolkit.filters import Condition
+from prompt_toolkit.filters import Condition, has_completions
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.history import FileHistory, InMemoryHistory
+from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
+from pydantic import BaseModel, ValidationError
+
+from my_cli.utils.logging import logger
 
 if TYPE_CHECKING:
     from prompt_toolkit.completion import CompleteEvent
@@ -49,6 +61,82 @@ if TYPE_CHECKING:
 PROMPT_SYMBOL = "✨"
 PROMPT_SYMBOL_SHELL = "$"
 PROMPT_SYMBOL_THINKING = "💫"
+
+# 状态栏刷新间隔（秒）
+_REFRESH_INTERVAL = 1.0
+
+# ⭐ 附件占位符正则（对齐官方 line 461-463）
+_ATTACHMENT_PLACEHOLDER_RE = re.compile(
+    r"\[(?P<type>image):(?P<id>[a-zA-Z0-9_\-\.]+)(?:,(?P<width>\d+)x(?P<height>\d+))?\]"
+)
+
+
+# ============================================================
+# Toast 通知系统 ⭐ 对齐官方实现
+# ============================================================
+
+
+@dataclass(slots=True)
+class _ToastEntry:
+    """Toast 条目"""
+    topic: str | None
+    """相同 topic 的 Toast 只保留一个"""
+    message: str
+    duration: float
+
+
+_toast_queue: deque[_ToastEntry] = deque()
+"""Toast 队列，第一个是当前正在显示的"""
+
+
+def toast(
+    message: str,
+    duration: float = 5.0,
+    topic: str | None = None,
+    immediate: bool = False,
+) -> None:
+    """
+    显示 Toast 通知 ⭐ 对齐官方实现
+
+    Args:
+        message: 通知消息
+        duration: 显示时长（秒）
+        topic: 主题（相同主题的 Toast 会被替换）
+        immediate: 是否立即显示（插入队列头部）
+
+    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:427-443
+    """
+    duration = max(duration, _REFRESH_INTERVAL)
+    entry = _ToastEntry(topic=topic, message=message, duration=duration)
+
+    # 移除相同 topic 的现有 Toast
+    if topic is not None:
+        for existing in list(_toast_queue):
+            if existing.topic == topic:
+                _toast_queue.remove(existing)
+
+    # 添加到队列
+    if immediate:
+        _toast_queue.appendleft(entry)
+    else:
+        _toast_queue.append(entry)
+
+
+def _current_toast() -> _ToastEntry | None:
+    """获取当前正在显示的 Toast"""
+    if not _toast_queue:
+        return None
+    return _toast_queue[0]
+
+
+def _toast_thinking(thinking: bool) -> None:
+    """显示 thinking 状态的 Toast ⭐ 对齐官方"""
+    toast(
+        f"thinking {'on' if thinking else 'off'}, tab to toggle",
+        duration=3.0,
+        topic="thinking",
+        immediate=True,
+    )
 
 
 # ============================================================
@@ -365,27 +453,87 @@ class FileMentionCompleter(Completer):
 
 
 # ============================================================
+# 历史记录系统 ⭐ 对齐官方实现
+# ============================================================
+
+
+class _HistoryEntry(BaseModel):
+    """历史记录条目"""
+    content: str
+
+
+def _load_history_entries(history_file: Path) -> list[_HistoryEntry]:
+    """
+    加载历史记录文件 ⭐ 对齐官方实现
+
+    Args:
+        history_file: 历史记录文件路径（JSONL 格式）
+
+    Returns:
+        历史记录条目列表
+
+    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:348-383
+    """
+    entries: list[_HistoryEntry] = []
+    if not history_file.exists():
+        return entries
+
+    try:
+        with history_file.open(encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Failed to parse user history line; skipping: {line}",
+                        line=line,
+                    )
+                    continue
+                try:
+                    entry = _HistoryEntry.model_validate(record)
+                    entries.append(entry)
+                except ValidationError:
+                    logger.warning(
+                        "Failed to validate user history entry; skipping: {line}",
+                        line=line,
+                    )
+                    continue
+    except OSError as exc:
+        logger.warning(
+            "Failed to load user history file: {file} ({error})",
+            file=history_file,
+            error=exc,
+        )
+
+    return entries
+
+
+# ============================================================
 # 输入封装 ⭐ Stage 12
 # ============================================================
 
 
-class UserInput:
-    """用户输入封装"""
+class UserInput(BaseModel):
+    """
+    用户输入封装 ⭐ 对齐官方实现
 
-    def __init__(
-        self,
-        command: str,
-        mode: PromptMode = PromptMode.AGENT,  # ⭐ Stage 13: 使用新的 PromptMode
-        thinking: bool = False,
-    ):
-        self.command = command
-        self.mode = mode
-        self.thinking = thinking
+    对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:397-409
+    """
+    mode: PromptMode
+    thinking: bool
+    command: str
+    """用户输入的纯文本表示"""
+    content: list[ContentPart]
+    """富文本内容（包含文本和附件）"""
 
-    @property
-    def content(self) -> str:
-        """获取实际内容（去除特殊前缀）"""
+    def __str__(self) -> str:
         return self.command
+
+    def __bool__(self) -> bool:
+        return bool(self.command)
 
 
 class CustomPromptSession:
@@ -430,32 +578,65 @@ class CustomPromptSession:
         # Stage 13：初始化模式状态 ⭐
         # ============================================================
         self._mode = PromptMode.AGENT  # 默认 Agent 模式
+        self._thinking = initial_thinking  # ⭐ Thinking 模式状态
 
-        # 创建历史记录 ⭐ Stage 19.1: 始终启用，使用 work_dir_id 哈希
-        from hashlib import md5
+        # 状态刷新任务（用于 Toast 超时）
+        self._status_refresh_task: asyncio.Task | None = None
+
+        # ⭐ 附件占位符映射（用于图片粘贴）
+        self._attachment_parts: dict[str, ContentPart] = {}  # attachment_id -> ContentPart
+
+        # ============================================================
+        # 历史记录 ⭐ 对齐官方：JSONL 格式 + InMemoryHistory
+        # ============================================================
         from my_cli.share import get_share_dir
 
         history_dir = get_share_dir() / "user-history"
         history_dir.mkdir(parents=True, exist_ok=True)
         work_dir_id = md5(str(self.work_dir).encode(encoding="utf-8")).hexdigest()
-        history_file = (history_dir / work_dir_id).with_suffix(".jsonl")
-        self.history = FileHistory(str(history_file))
+        self._history_file = (history_dir / work_dir_id).with_suffix(".jsonl")
+        self._last_history_content: str | None = None
+
+        # 加载历史记录到 InMemoryHistory
+        history_entries = _load_history_entries(self._history_file)
+        self.history = InMemoryHistory()
+        for entry in history_entries:
+            self.history.append_string(entry.content)
+
+        # 记录最后一条历史（用于去重）
+        if history_entries:
+            self._last_history_content = history_entries[-1].content
 
         # ============================================================
         # Stage 14：创建自动补全器（命令 + 文件）⭐ Stage 19.1: 始终启用
         # ============================================================
         # 合并多个补全器
-        self.completer = merge_completers(
+        self._agent_mode_completer = merge_completers(
             [
                 MetaCommandCompleter(),  # 斜杠命令补全
                 FileMentionCompleter(self.work_dir),  # ⭐ Stage 14: 文件路径补全
-            ]
+            ],
+            deduplicate=True,
         )
+        self.completer = self._agent_mode_completer  # 兼容旧代码
 
         # ============================================================
         # Stage 13：创建自定义键绑定（多行 + 模式切换）⭐
         # ============================================================
         kb = KeyBindings()
+        shortcut_hints: list[str] = []  # ⭐ 对齐官方：动态收集快捷键提示
+
+        # ⭐ Stage 22.2: Enter 接受补全（对齐官方 line 508-517）
+        @kb.add("enter", filter=has_completions)
+        def _accept_completion(event: KeyPressEvent) -> None:
+            """当有补全菜单显示时，Enter 接受第一个补全"""
+            buff = event.current_buffer
+            if buff.complete_state and buff.complete_state.completions:
+                # 获取当前选中的补全，如果没有选中则使用第一个
+                completion = buff.complete_state.current_completion
+                if not completion:
+                    completion = buff.complete_state.completions[0]
+                buff.apply_completion(completion)
 
         @kb.add("c-j", eager=True)
         @kb.add("escape", "enter", eager=True)
@@ -469,6 +650,8 @@ class CustomPromptSession:
             """
             event.current_buffer.insert_text("\n")
 
+        shortcut_hints.append("ctrl-j: newline")
+
         @kb.add("c-x", eager=True)
         def _toggle_mode(event: KeyPressEvent) -> None:
             """
@@ -478,72 +661,316 @@ class CustomPromptSession:
             - Ctrl+X: 切换模式
             """
             self._mode = self._mode.toggle()
+            # ⭐ 应用模式切换（取消补全菜单等）
+            self._apply_mode(event)
             # 重绘 UI（更新状态栏）
             event.app.invalidate()
+
+        shortcut_hints.append("ctrl-x: switch mode")
+
+        # ⭐ Stage 22.2: 剪贴板图片粘贴（对齐官方 line 537-547）
+        from my_cli.utils.clipboard import is_clipboard_available
+
+        if is_clipboard_available():
+            from prompt_toolkit.clipboard.pyperclip import PyperclipClipboard
+
+            @kb.add("c-v", eager=True)
+            def _paste(event: KeyPressEvent) -> None:
+                """粘贴剪贴板内容，支持图片"""
+                if self._try_paste_image(event):
+                    return
+                clipboard_data = event.app.clipboard.get_data()
+                event.current_buffer.paste_clipboard_data(clipboard_data)
+
+            shortcut_hints.append("ctrl-v: paste")
+            clipboard = PyperclipClipboard()
+        else:
+            clipboard = None
+
+        # ============================================================
+        # Stage 21：TAB 切换 Thinking 模式 ⭐ 对齐官方
+        # ============================================================
+        # 定义条件：当前是 Agent 模式
+        is_agent_mode = Condition(lambda: self._mode == PromptMode.AGENT)
+
+        # ⭐ 初始化时显示 thinking 状态（对齐官方 line 555）
+        _toast_thinking(self._thinking)
+
+        @kb.add("tab", filter=~has_completions & is_agent_mode, eager=True)
+        def _switch_thinking(event: KeyPressEvent) -> None:
+            """
+            切换 Thinking 模式 ⭐ 对齐官方实现
+
+            快捷键：
+            - TAB: 切换 thinking（仅在没有补全菜单且为 Agent 模式时）
+
+            对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:557-567
+            """
+            from my_cli.ui.shell.console import console
+
+            # 检查模型是否支持 thinking
+            if "thinking" not in self._model_capabilities:
+                console.print(
+                    "[yellow]Thinking mode is not supported by the selected LLM model[/yellow]"
+                )
+                return
+
+            # 切换 thinking 状态
+            self._thinking = not self._thinking
+
+            # 显示 Toast 通知
+            _toast_thinking(self._thinking)
+
+            # 重绘 UI
+            event.app.invalidate()
+
+        # ⭐ 保存快捷键提示到实例变量（对齐官方 line 569）
+        self._shortcut_hints = shortcut_hints
 
         # ============================================================
         # Stage 14：创建 PromptSession（集成补全优化）⭐
         # ============================================================
         self.session = PromptSession(
+            message=self._render_message,  # ⭐ 对齐官方：动态提示符
             history=self.history,
-            completer=self.completer,  # ⭐ 自动补全
+            completer=self._agent_mode_completer,  # ⭐ 自动补全
             complete_while_typing=Condition(
                 lambda: self._mode == PromptMode.AGENT
             ),  # ⭐ Stage 14: 只在 AGENT 模式下自动补全
             key_bindings=kb,  # ⭐ 自定义键绑定（多行 + 模式切换）
+            clipboard=clipboard,  # ⭐ 对齐官方：剪贴板支持
             multiline=False,  # 默认单行（Ctrl+J 换行）
             enable_history_search=True,  # 启用历史搜索
             bottom_toolbar=self._render_bottom_toolbar,  # ⭐ Stage 13: 状态栏
         )
 
+    def _render_message(self) -> FormattedText:
+        """
+        渲染提示符 ⭐ 对齐官方实现
+
+        根据模式和 thinking 状态显示不同提示符：
+        - Agent 模式: ✨
+        - Agent + Thinking: 💫
+        - Shell 模式: $
+
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:590-594
+        """
+        symbol = PROMPT_SYMBOL if self._mode == PromptMode.AGENT else PROMPT_SYMBOL_SHELL
+        if self._mode == PromptMode.AGENT and self._thinking:
+            symbol = PROMPT_SYMBOL_THINKING
+        return FormattedText([("bold", f"{getpass.getuser()}@{Path.cwd().name}{symbol} ")])
+
+    def _append_history_entry(self, text: str) -> None:
+        """
+        追加历史记录 ⭐ 对齐官方实现
+
+        Args:
+            text: 用户输入文本
+
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:724-743
+        """
+        entry = _HistoryEntry(content=text.strip())
+        if not entry.content:
+            return
+
+        # 跳过与上一条相同的记录（去重）
+        if entry.content == self._last_history_content:
+            return
+
+        try:
+            self._history_file.parent.mkdir(parents=True, exist_ok=True)
+            with self._history_file.open("a", encoding="utf-8") as f:
+                f.write(entry.model_dump_json(ensure_ascii=False) + "\n")
+            self._last_history_content = entry.content
+        except OSError as exc:
+            logger.warning(
+                "Failed to append user history entry: {file} ({error})",
+                file=self._history_file,
+                error=exc,
+            )
+
+    def _try_paste_image(self, event: KeyPressEvent) -> bool:
+        """
+        尝试从剪贴板粘贴图片 ⭐ 对齐官方实现
+
+        Args:
+            event: 键盘事件
+
+        Returns:
+            True 如果成功粘贴图片
+
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:646-687
+
+        注意：需要安装 Pillow 库
+        """
+        try:
+            from PIL import Image, ImageGrab
+        except ImportError:
+            # PIL 未安装，返回 False 让普通文本粘贴生效
+            return False
+
+        # 尝试从剪贴板获取图片
+        image = ImageGrab.grabclipboard()
+        if isinstance(image, list):
+            # 某些平台返回文件路径列表
+            for item in image:
+                try:
+                    with Image.open(item) as img:
+                        image = img.copy()
+                    break
+                except Exception:
+                    continue
+            else:
+                image = None
+
+        if image is None:
+            return False
+
+        # 检查模型是否支持图片输入
+        if "image_in" not in self._model_capabilities:
+            from my_cli.ui.shell.console import console
+            console.print("[yellow]Image input is not supported by the selected LLM model[/yellow]")
+            return False
+
+        # 生成附件 ID 和占位符
+        try:
+            from my_cli.utils.string import random_string
+        except ImportError:
+            import random
+            import string
+            random_string = lambda n: ''.join(random.choices(string.ascii_letters + string.digits, k=n))
+
+        import base64
+        from io import BytesIO
+
+        attachment_id = f"{random_string(8)}.png"
+        png_bytes = BytesIO()
+        image.save(png_bytes, format="PNG")
+        png_base64 = base64.b64encode(png_bytes.getvalue()).decode("ascii")
+
+        # 创建 ImageURLPart（对齐官方）
+        from kosong.message import ImageURLPart
+
+        image_part = ImageURLPart(
+            image_url=ImageURLPart.ImageURL(
+                url=f"data:image/png;base64,{png_base64}",
+                id=attachment_id,
+            )
+        )
+        self._attachment_parts[attachment_id] = image_part
+
+        logger.debug(
+            "Pasted image from clipboard: {attachment_id}, {image_size}",
+            attachment_id=attachment_id,
+            image_size=image.size,
+        )
+
+        # 插入占位符
+        placeholder = f"[image:{attachment_id},{image.width}x{image.height}]"
+        event.current_buffer.insert_text(placeholder)
+        event.app.invalidate()
+        return True
+
+    def _apply_mode(self, event: KeyPressEvent | None = None) -> None:
+        """
+        应用模式切换 ⭐ 对齐官方实现
+
+        在 Agent/Shell 模式切换时：
+        - Shell 模式：取消补全菜单，使用 DummyCompleter
+        - Agent 模式：恢复 agent_mode_completer
+
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:596-612
+        """
+        # 获取当前 buffer
+        try:
+            buff = event.current_buffer if event is not None else self.session.default_buffer
+        except Exception:
+            buff = None
+
+        if self._mode == PromptMode.SHELL:
+            # Shell 模式：取消补全菜单
+            with contextlib.suppress(Exception):
+                if buff is not None:
+                    buff.cancel_completion()
+            if buff is not None:
+                buff.completer = DummyCompleter()
+        else:
+            # Agent 模式：恢复补全器
+            if buff is not None:
+                buff.completer = self._agent_mode_completer
+
     def _render_bottom_toolbar(self) -> FormattedText:
         """
-        渲染底部状态栏 ⭐ Stage 16 使用 status_provider
+        渲染底部状态栏 ⭐ 对齐官方实现
 
         显示内容：
         - 当前时间（HH:MM 格式）
-        - 当前模式（agent/shell）
-        - 快捷键提示
-        - Context 使用率（右对齐，动态获取）⭐ Stage 16
+        - 当前模式（agent/shell）+ thinking 状态
+        - Toast 通知或快捷键提示
+        - Context 使用率（右对齐）
 
         Returns:
             FormattedText 对象
 
-        TODO (Stage 17+):
-        - 添加模型名称显示（需要扩展 StatusSnapshot 或单独传递）
-        - 添加 Thinking 状态显示
-        - 添加 Toast 通知
-        - 动态快捷键提示（根据终端宽度）
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:745-788
         """
+        # 获取终端宽度
+        app = get_app_or_none()
+        if app is not None:
+            columns = app.output.get_size().columns
+        else:
+            columns = 80  # 默认宽度
+
         fragments: list[tuple[str, str]] = []
 
         # 添加时间
         now_text = datetime.now().strftime("%H:%M")
         fragments.extend([("", now_text), ("", " " * 2)])
+        columns -= len(now_text) + 2
 
-        # 添加模式（颜色区分）
+        # 添加模式（带 thinking 状态）
         mode_text = str(self._mode).lower()
-        mode_style = "bg:#ff6b6b fg:#ffffff" if self._mode == PromptMode.SHELL else "bg:#4ecdc4 fg:#000000"
-        fragments.extend([(mode_style, f" {mode_text} "), ("", " " * 2)])
+        if self._mode == PromptMode.AGENT and self._thinking:
+            mode_text += " (thinking)"
+        fragments.extend([("", mode_text), ("", " " * 2)])
+        columns -= len(mode_text) + 2
 
-        # 添加快捷键提示
-        fragments.append(("fg:#888888", "ctrl-x: 切换模式  ctrl-d: 退出  "))
-
-        # 计算已使用的空间
-        used_width = sum(len(text) for _, text in fragments)
-
-        # 添加 Context 使用率（右对齐，动态获取）⭐ Stage 16
+        # 获取 Context 使用率
         if self._status_provider:
-            status = self._status_provider()  # ⭐ 调用回调获取最新状态
-            context_text = f"context: {status.context_usage:.1%}"
+            status = self._status_provider()
+            bounded = max(0.0, min(status.context_usage, 1.0))
+            status_text = f"context: {bounded:.1%}"
         else:
-            context_text = "context: N/A"
+            status_text = "context: N/A"
 
-        # 计算需要的空白填充（假设终端宽度为 80）
-        terminal_width = 80  # 简化版，固定宽度
-        padding = max(1, terminal_width - used_width - len(context_text))
+        # 显示 Toast 或快捷键提示
+        current_toast = _current_toast()
+        if current_toast is not None:
+            # 显示 Toast 消息
+            fragments.extend([("", current_toast.message), ("", " " * 2)])
+            columns -= len(current_toast.message) + 2
+
+            # 递减 Toast 时长
+            current_toast.duration -= _REFRESH_INTERVAL
+            if current_toast.duration <= 0.0:
+                _toast_queue.popleft()
+        else:
+            # 显示快捷键提示（对齐官方：使用 _shortcut_hints + ctrl-d: exit）
+            shortcuts = [
+                *self._shortcut_hints,
+                "ctrl-d: exit",
+            ]
+            for shortcut in shortcuts:
+                if columns - len(status_text) > len(shortcut) + 2:
+                    fragments.extend([("", shortcut), ("", " " * 2)])
+                    columns -= len(shortcut) + 2
+                else:
+                    break
+
+        # 右对齐 Context 使用率
+        padding = max(1, columns - len(status_text))
         fragments.append(("", " " * padding))
-        fragments.append(("fg:#888888", context_text))
+        fragments.append(("", status_text))
 
         return FormattedText(fragments)
 
@@ -560,35 +987,100 @@ class CustomPromptSession:
         Returns:
             UserInput 对象
         """
-        # 获取输入（支持自动补全）
-        user_input = await self.session.prompt_async(
-            f"{PROMPT_SYMBOL} You: ",
-            # enable_suspend=True,  # 允许 Ctrl+Z 挂起（可选）
+        # 获取输入（使用动态提示符）
+        user_input = await self.session.prompt_async()
+        command = str(user_input).strip()
+        command = command.replace("\x00", "")  # ⭐ 对齐官方：移除空字节
+
+        # ⭐ 追加到历史记录（对齐官方）
+        self._append_history_entry(command)
+
+        # ⭐ Stage 22.2: 解析附件占位符（对齐官方 line 695-716）
+        from kosong.message import ContentPart, TextPart
+
+        content: list[ContentPart] = []
+        remaining_command = command
+
+        while match := _ATTACHMENT_PLACEHOLDER_RE.search(remaining_command):
+            start, end = match.span()
+
+            # 添加占位符前的文本
+            if start > 0:
+                content.append(TextPart(text=remaining_command[:start]))
+
+            # 查找附件
+            attachment_id = match.group("id")
+            part = self._attachment_parts.get(attachment_id)
+
+            if part is not None:
+                content.append(part)
+            else:
+                # 找不到附件，保留占位符文本
+                logger.warning(
+                    "Attachment placeholder found but no matching attachment part: {placeholder}",
+                    placeholder=match.group(0),
+                )
+                content.append(TextPart(text=match.group(0)))
+
+            remaining_command = remaining_command[end:]
+
+        # 添加剩余文本
+        if remaining_command.strip():
+            content.append(TextPart(text=remaining_command.strip()))
+
+        # 封装为 UserInput（包含模式、thinking 和富文本内容）
+        return UserInput(
+            mode=self._mode,
+            thinking=self._thinking,
+            command=command,
+            content=content,
         )
 
-        # 封装为 UserInput
-        return UserInput(command=user_input.strip())
-
     def __enter__(self):
-        """上下文管理器：进入"""
+        """
+        上下文管理器：进入 ⭐ 对齐官方实现
+
+        启动状态刷新任务，用于 Toast 超时和状态栏更新。
+
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:614-638
+        """
+        if self._status_refresh_task is not None and not self._status_refresh_task.done():
+            return self
+
+        async def _refresh(interval: float) -> None:
+            """定时刷新 UI（用于 Toast 超时）"""
+            try:
+                while True:
+                    app = get_app_or_none()
+                    if app is not None:
+                        app.invalidate()
+
+                    try:
+                        asyncio.get_running_loop()
+                    except RuntimeError:
+                        self._status_refresh_task = None
+                        break
+
+                    await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                # 优雅退出
+                pass
+
+        self._status_refresh_task = asyncio.create_task(_refresh(_REFRESH_INTERVAL))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """上下文管理器：退出"""
-        # 清理资源（如果需要）
-        pass
+        """
+        上下文管理器：退出 ⭐ 对齐官方实现
 
+        取消状态刷新任务。
 
-def toast(message: str) -> None:
-    """
-    显示 Toast 通知
-
-    Stage 11：简化版，直接打印
-    官方版：使用 rich 的 Live 显示临时消息
-    """
-    from my_cli.ui.shell.console import console
-
-    console.print(f"[grey50]💡 {message}[/grey50]")
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/prompt.py:640-644
+        """
+        if self._status_refresh_task is not None and not self._status_refresh_task.done():
+            self._status_refresh_task.cancel()
+        self._status_refresh_task = None
+        self._attachment_parts.clear()  # ⭐ 对齐官方：清理附件
 
 
 __all__ = [
