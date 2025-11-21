@@ -1,0 +1,72 @@
+"""
+测试工具 ⭐ Stage 30
+
+用于测试的简单工具集合。
+
+对应源码：kimi-cli-fork/src/kimi_cli/tools/test.py
+"""
+
+import asyncio
+from typing import override
+
+from kosong.tooling import CallableTool2, ToolOk, ToolReturnType
+from pydantic import BaseModel
+
+
+class PlusParams(BaseModel):
+    a: float
+    b: float
+
+
+class Plus(CallableTool2[PlusParams]):
+    """加法工具"""
+
+    name: str = "plus"
+    description: str = "Add two numbers"
+    params: type[PlusParams] = PlusParams
+
+    @override
+    async def __call__(self, params: PlusParams) -> ToolReturnType:
+        return ToolOk(output=str(params.a + params.b))
+
+
+class CompareParams(BaseModel):
+    a: float
+    b: float
+
+
+class Compare(CallableTool2[CompareParams]):
+    """比较工具"""
+
+    name: str = "compare"
+    description: str = "Compare two numbers"
+    params: type[CompareParams] = CompareParams
+
+    @override
+    async def __call__(self, params: CompareParams) -> ToolReturnType:
+        if params.a > params.b:
+            return ToolOk(output="greater")
+        elif params.a < params.b:
+            return ToolOk(output="less")
+        else:
+            return ToolOk(output="equal")
+
+
+class PanicParams(BaseModel):
+    message: str
+
+
+class Panic(CallableTool2[PanicParams]):
+    """异常工具（用于测试错误处理）"""
+
+    name: str = "panic"
+    description: str = "Raise an exception to cause the tool call to fail."
+    params: type[PanicParams] = PanicParams
+
+    @override
+    async def __call__(self, params: PanicParams) -> ToolReturnType:
+        await asyncio.sleep(2)
+        raise Exception(f"panicked with a message with {len(params.message)} characters")
+
+
+__all__ = ["Plus", "Compare", "Panic"]
