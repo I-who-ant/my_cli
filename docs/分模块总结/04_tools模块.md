@@ -39,6 +39,7 @@ my_cli/tools/
 ### 工具类型分层
 
 ```mermaid
+
 graph TB
     A[Tool Protocol] --> B[CallableTool2 类型化工具]
     B --> C[Bash 工具]
