@@ -2,7 +2,7 @@
 
 ## 🎯 模块概览
 
-Soul 模块是 Kimi CLI 的**AI 大脑**，实现了 AI Agent 的完整生命周期。它采用**分层架构**设计，通过 Protocol 定义接口、工厂模式创建实例、Wire 机制通信，实现了一个优雅、可扩展的 AI 引擎。
+Soul 模块是 Kimi CLI 的**AI 大脑核心**，只负责定义 AI Agent 的接口规范。它采用**Protocol 驱动设计**，通过简洁的接口定义实现完全解耦，为上层提供统一的 AI Agent 契约。这是整个系统中最精简的模块，体现了**KISS 原则**的精髓。
 
 ---
 
@@ -10,297 +10,323 @@ Soul 模块是 Kimi CLI 的**AI 大脑**，实现了 AI Agent 的完整生命周
 
 ```
 my_cli/soul/
-├── __init__.py              # 核心接口 + 工厂函数 + Wire 机制
-├── kimisoul.py             # KimiSoul 具体实现（Agent 循环）
-├── agent.py                # Agent 定义 + load_agent() 加载
-├── runtime.py              # Runtime 运行时（LLM + 配置）
-├── context.py              # Context 上下文管理
-├── approval.py             # Approval 批准系统
-├── denwarenji.py           # DenwaRenji 时空穿越机制
-├── compaction.py           # Context 压缩优化
-├── message.py              # 消息处理工具
-└── toolset.py              # Toolset 工具集协议
+└── __init__.py              # 核心接口 + Wire 机制（仅此文件）
 ```
+
+**设计理念**: 极简主义 - 只需一个文件！
 
 ---
 
 ## 🏗️ 架构设计
 
-### 三层抽象架构
+### 核心设计原则
 
 ```mermaid
-graph TB
-    A[Soul Protocol] --> B[KimiSoul 实现]
-    B --> C[Agent 身份]
-    B --> D[Runtime 能力]
-    B --> E[Context 记忆]
-    B --> F[Wire 通信]
+graph LR
+    A[UI 层] --> B[Wire 通信]
+    B --> C[Soul 接口]
+    C --> D[具体实现]
+    D --> E[工具执行]
+    E --> F[LLM 调用]
 ```
 
-### 核心组件职责
+### 职责划分
 
-| 组件 | 职责 | 设计模式 |
-|------|------|----------|
-| **Soul** | 抽象接口，定义 AI Agent 协议 | Protocol |
-| **KimiSoul** | 具体实现，Agent 主循环 | 组合模式 |
-| **Agent** | 身份定义（名称 + 系统提示词 + 工具） | 数据类 |
-| **Runtime** | 运行时环境（LLM + 配置 + Approval） | 配置驱动 |
-| **Context** | 对话上下文管理（历史 + 压缩） | 状态管理 |
-| **Wire** | 与 UI 的异步通信机制 | 发布-订阅 |
+| 层次 | 职责 | 内容 |
+|------|------|------|
+| **接口层** | 定义契约 | Soul Protocol + 异常类 |
+| **通信层** | Wire 机制 | run_soul() + wire_send() |
+| **实现层** | 具体 Agent | 独立模块实现（不在本目录） |
 
 ---
 
 ## 📄 文件详解
 
-### 1. `__init__.py` - 核心接口与工厂
+### `__init__.py` - 核心接口与 Wire 机制
 
-**核心抽象**:
+#### 1. 异常类定义
+
+**LLM 未设置异常**:
+
+```python
+class LLMNotSet(Exception):
+    """当 LLM 未设置时抛出的异常"""
+    pass
+```
+
+**优雅之处**:
+- ✅ 语义清晰 - 一看就懂什么错误
+- ✅ 类型安全 - 专门捕获此类异常
+- ✅ 用户友好 - 清晰的错误提示
+
+**LLM 不支持异常**:
+
+```python
+class LLMNotSupported(Exception):
+    """当 LLM 不支持所需能力时抛出的异常"""
+
+    def __init__(self, llm: LLM, capabilities: list[ModelCapability]):
+        self.llm = llm
+        self.capabilities = capabilities
+        capabilities_str = "capability" if len(capabilities) == 1 else "capabilities"
+        super().__init__(
+            f"LLM 模型 '{llm.model_name}' 不支持所需 {capabilities_str}: "
+            f"{', '.join(capabilities)}."
+        )
+```
+
+**优雅之处**:
+- ✅ 详细错误信息 - 包含模型名和缺失的能力
+- ✅ 动态提示 - 根据能力数量调整措辞
+- ✅ 结构化存储 - 同时存储 llm 和 capabilities 便于调试
+
+**最大步骤数异常**:
+
+```python
+class MaxStepsReached(Exception):
+    """当达到最大步骤数时抛出的异常"""
+
+    n_steps: int
+    """已执行的步数"""
+
+    def __init__(self, n_steps: int):
+        self.n_steps = n_steps
+```
+
+**优雅之处**:
+- ✅ 数据类存储 - 使用 dataclass 简化代码
+- ✅ 便于统计 - 存储执行的步数用于分析
+
+#### 2. 状态快照
+
+```python
+@dataclass(frozen=True, slots=True)
+class StatusSnapshot:
+    context_usage: float
+    """上下文使用率，单位为百分比"""
+```
+
+**优雅之处**:
+- ✅ **不可变对象** - 使用 `frozen=True` 防止修改
+- ✅ **内存优化** - 使用 `slots=True` 减少内存占用
+- ✅ **类型明确** - 清楚标明这是百分比
+
+#### 3. Soul Protocol 核心接口
 
 ```python
 @runtime_checkable
 class Soul(Protocol):
-    """Soul Protocol - AI Agent 核心引擎的接口定义"""
+    """AI Agent 核心协议"""
 
     @property
-    def name(self) -> str: ...
+    def name(self) -> str:
+        """Agent 的名称"""
 
     @property
-    def model_name(self) -> str: ...
+    def model_name(self) -> str:
+        """Agent 使用的 LLM 模型名称。空字符串表示未配置 LLM"""
 
     @property
-    def model_capabilities(self) -> set[str] | None: ...
+    def model_capabilities(self) -> set[ModelCapability] | None:
+        """Agent 使用的 LLM 模型能力。None 表示未配置 LLM"""
 
     @property
-    def status(self) -> StatusSnapshot: ...
+    def status(self) -> StatusSnapshot:
+        """Agent 的当前状态。返回值为不可变对象"""
 
-    async def run(self, user_input: str): ...
+    async def run(self, user_input: str | list[ContentPart]):
+        """
+        运行 Agent，处理用户输入直到达到最大步骤数或无更多工具调用
+
+        参数:
+            user_input (str | list[ContentPart]): 用户的输入
+
+        抛出异常:
+            LLMNotSet: 当 LLM 未设置时
+            LLMNotSupported: 当 LLM 不支持所需能力时
+            ChatProviderError: 当 LLM 提供商返回错误时
+            MaxStepsReached: 当达到最大步骤数时
+            asyncio.CancelledError: 当用户取消运行时
+        """
+        ...
 ```
 
 **优雅之处**:
-1. **Protocol 驱动**: 使用 Protocol 定义接口，而非抽象基类
-2. **类型安全**: 完整的类型注解，IDE 支持友好
-3. **运行时检查**: `@runtime_checkable` 支持 `isinstance()` 检查
+1. **Protocol 驱动**:
+   - ✅ 鸭子类型 - 任何实现了接口的类都是 `Soul`
+   - ✅ 无需继承 - 保持实现类的灵活性
+   - ✅ 运行时检查 - `@runtime_checkable` 支持 `isinstance()` 检查
+   - ✅ 类型安全 - 完整的类型注解和泛型支持
+   - ✅ IDE 友好 - 自动补全和类型检查
 
-**工厂函数**:
+2. **属性设计**:
+   - ✅ 只读属性 - 防止外部修改内部状态
+   - ✅ 状态快照 - 不可变对象保证线程安全
+   - ✅ 能力查询 - 动态获取 LLM 能力
+
+3. **异步接口**:
+   - ✅ 非阻塞 - 不会阻塞主线程
+   - ✅ 流式支持 - 支持流式输出
+   - ✅ 取消支持 - 用户可以随时取消
+
+#### 4. UI Loop 函数类型
 
 ```python
-async def create_soul(...) -> KimiSoul:
-    """便捷工厂函数 - 创建 KimiSoul 实例"""
-    # 1. 加载配置文件
-    config = load_config(config_file)
-
-    # 2. 创建 LLM
-    llm = create_llm(provider, model, stream=True)
-
-    # 3. 创建 Runtime
-    runtime = Runtime(llm=llm, max_steps=20)
-
-    # 4. 加载 Agent（使用依赖注入）
-    loaded_agent = await load_agent(DEFAULT_AGENT_FILE, runtime)
-
-    # 5. 创建 Context
-    context = Context(session.history_file)
-    await context.restore()
-
-    # 6. 创建 KimiSoul
-    soul = KimiSoul(agent=loaded_agent, runtime=runtime, context=context)
-    return soul
+type UILoopFn = Callable[[WireUISide], Coroutine[Any, Any, None]]
+"""用于可视化 Agent 行为的长时间运行的异步函数"""
 ```
 
 **优雅之处**:
-1. **配置驱动**: 通过配置文件和工厂函数创建实例
-2. **依赖注入**: `load_agent()` 自动注入 Runtime、Approval 等依赖
-3. **延迟初始化**: 使用 async 工厂函数，避免循环导入
+- ✅ **类型别名** - 使用 `type` 定义函数类型
+- ✅ **异步优先** - 所有操作都是异步的
+- ✅ **灵活性** - 支持任何可视化实现
 
-**Wire 机制核心函数**:
+#### 5. 运行取消异常
 
 ```python
-# ContextVar: 线程安全的全局变量
-_current_wire = ContextVar[Wire | None]("current_wire", default=None)
+class RunCancelled(Exception):
+    """当运行被取消事件中止时抛出的异常"""
+```
 
-def wire_send(msg: WireMessage) -> None:
-    """发送消息到当前 Wire"""
-    wire = get_wire_or_none()
-    assert wire is not None
-    wire.soul_side.send(msg)
+**优雅之处**:
+- ✅ **语义明确** - 区分正常完成和被取消
+- ✅ **上层感知** - UI 层可以捕获并处理
 
-async def run_soul(soul, user_input, ui_loop_fn, cancel_event):
-    """运行 Soul 并连接到 UI Loop"""
-    # 1. 创建 Wire 并设置到 ContextVar
+#### 6. run_soul() 核心函数
+
+```python
+async def run_soul(
+    soul: Soul,
+    user_input: str | list[ContentPart],
+    ui_loop_fn: UILoopFn,
+    cancel_event: asyncio.Event,
+) -> None:
+    """
+    使用给定的用户输入运行 Agent，通过 Wire 连接到 UI 循环
+
+    `cancel_event` 是用于取消运行的外部句柄。当设置事件时，
+    运行将优雅地停止并抛出 `RunCancelled` 异常。
+
+    抛出异常:
+        LLMNotSet: 当 LLM 未设置时
+        LLMNotSupported: 当 LLM 不支持所需能力时
+        ChatProviderError: 当 LLM 提供商返回错误时
+        MaxStepsReached: 当达到最大步骤数时
+        RunCancelled: 当运行被取消事件中止时
+    """
     wire = Wire()
     wire_token = _current_wire.set(wire)
 
-    # 2. 启动 UI Loop 任务
+    logger.debug("Starting UI loop with function: {ui_loop_fn}", ui_loop_fn=ui_loop_fn)
     ui_task = asyncio.create_task(ui_loop_fn(wire.ui_side))
 
-    # 3. 启动 Soul 任务
+    logger.debug("Starting soul run")
     soul_task = asyncio.create_task(soul.run(user_input))
 
-    # 4. 等待任意任务完成
-    await asyncio.wait([soul_task, cancel_event_task], return_when=asyncio.FIRST_COMPLETED)
-
-    # 5. 关闭 Wire 并清理
-    wire.shutdown()
-    _current_wire.reset(wire_token)
-```
-
-**优雅之处**:
-1. **ContextVar 模式**: 线程安全的全局状态管理
-2. **任务协调**: 使用 `asyncio.wait()` 精确控制任务
-3. **优雅退出**: shutdown + 资源清理
-
-### 2. `kimisoul.py` - KimiSoul 具体实现
-
-**核心 Agent 循环**:
-
-```python
-async def _agent_loop(self):
-    """主 Agent 循环"""
-    step_no = 1
-    while True:
-        # 1. 发送步骤开始事件
-        wire_send(StepBegin(n=step_no))
-
-        # 2. 启动 Approval 管道（异步处理批准请求）
-        approval_task = asyncio.create_task(_pipe_approval_to_wire())
-
-        try:
-            # 3. 必要时压缩 Context
-            if self._context.token_count + self._reserved_tokens >= self._runtime.llm.max_context_size:
-                wire_send(CompactionBegin())
-                await self.compact_context()
-                wire_send(CompactionEnd())
-
-            # 4. 执行单步
-            await self._checkpoint()
-            self._denwa_renji.set_n_checkpoints(self._context.n_checkpoints)
-            finished = await self._step()
-
-        except BackToTheFuture as e:
-            # 5. 时空穿越（D-Mail 机制）
-            await self._context.revert_to(e.checkpoint_id)
-            await self._checkpoint()
-            await self._context.append_message(e.messages)
-            continue
-
-        finally:
-            approval_task.cancel()  # 清理 Approval 任务
-
-        # 6. 检查是否完成
-        if finished:
-            return
-
-        step_no += 1
-        if step_no > self._loop_control.max_steps_per_run:
-            raise MaxStepsReached(self._loop_control.max_steps_per_run)
-```
-
-**优雅之处**:
-1. **异步管道**: 并行处理 Approval 请求和工具执行
-2. **状态管理**: 使用 Checkpoint 机制支持回滚
-3. **时空穿越**: D-Mail 机制允许 Agent 给过去的自己发消息
-4. **智能压缩**: 自动检测 Context 长度并压缩
-
-**单步执行与重试**:
-
-```python
-@tenacity.retry(
-    retry=retry_if_exception(self._is_retryable_error),
-    wait=wait_exponential_jitter(initial=0.3, max=5, jitter=0.5),
-    stop=stop_after_attempt(self._loop_control.max_retries_per_step),
-)
-async def _kosong_step_with_retry() -> StepResult:
-    return await kosong.step(
-        chat_provider.with_thinking(self._thinking_effort),
-        self._agent.system_prompt,
-        self._agent.toolset,
-        self._context.history,
-        on_message_part=wire_send,  # 流式输出回调
-        on_tool_result=wire_send,   # 工具结果回调
+    cancel_event_task = asyncio.create_task(cancel_event.wait())
+    await asyncio.wait(
+        [soul_task, cancel_event_task],
+        return_when=asyncio.FIRST_COMPLETED,
     )
+
+    try:
+        if cancel_event.is_set():
+            logger.debug("Cancelling the run task")
+            soul_task.cancel()
+            try:
+                await soul_task
+            except asyncio.CancelledError:
+                raise RunCancelled from None
+        else:
+            assert soul_task.done()  # either stop event is set or the run task is done
+            cancel_event_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cancel_event_task
+            soul_task.result()  # this will raise if any exception was raised in the run task
+    finally:
+        logger.debug("Shutting down the UI loop")
+        # shutting down the wire should break the UI loop
+        wire.shutdown()
+        try:
+            await asyncio.wait_for(ui_task, timeout=0.5)
+        except asyncio.QueueShutDown:
+            logger.debug("UI loop shut down")
+            pass
+        except TimeoutError:
+            logger.warning("UI loop timed out")
+        finally:
+            _current_wire.reset(wire_token)
 ```
 
 **优雅之处**:
-1. **重试机制**: 使用 tenacity 实现指数退避重试
-2. **幂等性**: 对网络错误自动重试，提升可靠性
-3. **回调机制**: 通过回调实时发送流式输出
+1. **三任务协调**:
+   - ✅ **UI 任务** - 负责可视化界面
+   - ✅ **Soul 任务** - 负责 Agent 执行
+   - ✅ **取消任务** - 监听取消事件
 
-### 3. `agent.py` - Agent 身份与依赖注入
+2. **ContextVar 模式**:
+   ```python
+   wire_token = _current_wire.set(wire)  # 设置全局 Wire
+   ...
+   _current_wire.reset(wire_token)      # 清理全局 Wire
+   ```
+   - ✅ 线程安全 - 每个任务有独立的 Wire
+   - ✅ 自动清理 - finally 块确保资源释放
 
-**Agent 定义**:
+3. **精确控制**:
+   ```python
+   await asyncio.wait(
+       [soul_task, cancel_event_task],
+       return_when=asyncio.FIRST_COMPLETED,
+   )
+   ```
+   - ✅ 等待任意任务完成
+   - ✅ 优雅处理取消
+   - ✅ 资源清理
+
+4. **错误处理**:
+   - ✅ 捕获 `CancelledError` 并转换为 `RunCancelled`
+   - ✅ 使用 `assert` 确保逻辑正确
+   - ✅ 超时处理防止 UI 任务卡死
+
+#### 7. Wire 通信机制
 
 ```python
-@dataclass(frozen=True, slots=True, kw_only=True)
-class Agent:
-    """Agent - 定义 AI Agent 的身份和能力"""
-    name: str
-    system_prompt: str
-    toolset: Toolset
+_current_wire = ContextVar[Wire | None]("current_wire", default=None)
+"""当前 Wire 连接的上下文变量"""
+
+
+def get_wire_or_none() -> Wire | None:
+    """
+    获取当前 Wire 或 None
+
+    预期在 Agent 循环中的任何地方调用时都不为 None
+    """
+    return _current_wire.get()
+
+
+def wire_send(msg: WireMessage) -> None:
+    """
+    向当前 Wire 发送消息
+
+    将此视为 Soul 的 `print` 和 `input`
+    Soul 应该始终使用此函数发送 Wire 消息
+    """
+    wire = get_wire_or_none()
+    assert wire is not None, "Wire is expected to be set when soul is running"
+    wire.soul_side.send(msg)
 ```
 
 **优雅之处**:
-1. **不可变数据**: 使用 frozen + slots 保证数据安全
-2. **单一职责**: Agent 只负责身份定义，不关心运行时
+1. **ContextVar 设计**:
+   - ✅ 线程安全 - 每个协程有独立的 Wire
+   - ✅ 自动管理 - 不需要手动传递 Wire
+   - ✅ 延迟访问 - 在需要时才获取 Wire
 
-**依赖注入机制**:
-
-```python
-async def load_agent(agent_file, runtime, *, mcp_configs=None) -> Agent:
-    """从规范文件加载 Agent"""
-    # 1. 工具依赖注入映射
-    tool_deps: dict[type, Any] = {
-        ResolvedAgentSpec: agent_spec,
-        Runtime: runtime,
-        Config: runtime.config,
-        BuiltinSystemPromptArgs: runtime.builtin_args,
-        Session: runtime.session,
-        DenwaRenji: runtime.denwa_renji,
-        Approval: runtime.approval,
-    }
-
-    # 2. 使用 inspect.signature 自动注入依赖
-    for param in inspect.signature(cls).parameters.values():
-        if param.kind == inspect.Parameter.KEYWORD_ONLY:
-            break  # 遇到 keyword-only 参数时停止注入
-        if param.annotation not in dependencies:
-            raise ValueError(f"Tool dependency not found: {param.annotation}")
-        args.append(dependencies[param.annotation])
-
-    return cls(*args)
-```
-
-**优雅之处**:
-1. **自动注入**: 使用 inspect.signature 自动匹配依赖
-2. **类型安全**: 通过类型注解确保依赖正确性
-3. **灵活扩展**: 支持 keyword-only 参数（手动注入特殊依赖）
-
-### 4. `runtime.py` - Runtime 运行时环境
-
-（详细内容需要查看 runtime.py 文件）
-
-### 5. `context.py` - Context 上下文管理
-
-（详细内容需要查看 context.py 文件）
-
-### 6. `approval.py` - Approval 批准系统
-
-（详细内容需要查看 approval.py 文件）
-
-### 7. `denwarenji.py` - 时空穿越机制
-
-（详细内容需要查看 denwarenji.py 文件）
-
-### 8. `compaction.py` - Context 压缩优化
-
-（详细内容需要查看 compaction.py 文件）
-
-### 9. `message.py` - 消息处理工具
-
-（详细内容需要查看 message.py 文件）
-
-### 10. `toolset.py` - Toolset 工具集协议
-
-（详细内容需要查看 toolset.py 文件）
+2. **全局函数**:
+   - ✅ **简化调用** - 任何地方直接调用 `wire_send()`
+   - ✅ **统一接口** - 将 `print` 和 `input` 统一为消息发送
+   - ✅ **断言保护** - 确保在正确的上下文中调用
 
 ---
 
@@ -330,123 +356,56 @@ class Soul(Protocol):
 ```
 
 **优势**:
-- ✅ **鸭子类型**: 任何实现了接口的类都是 `Soul`
-- ✅ **无需继承**: 保持实现类的灵活性
-- ✅ **运行时检查**: `@runtime_checkable` 支持 `isinstance()`
-- ✅ **类型安全**: 完整的类型提示支持
+- ✅ **鸭子类型** - 任何实现了接口的类都是 `Soul`
+- ✅ **无需继承** - 保持实现类的灵活性
+- ✅ **运行时检查** - `@runtime_checkable` 支持 `isinstance()`
+- ✅ **类型安全** - 完整的类型提示支持
+- ✅ **IDE 友好** - 自动补全和类型检查
+- ✅ **解耦设计** - 实现类可以来自任何模块
 
-### 2. 工厂模式解耦创建逻辑
+### 2. 极简设计哲学
 
-**问题**: 直接实例化会导致依赖混乱
+**重构前的问题**:
+- ❌ 500+ 行代码
+- ❌ 循环导入（Runtime、Agent）
+- ❌ 工厂函数（create_soul）
+- ❌ 复杂注释和文档
+
+**重构后的简洁**:
+- ✅ 180 行核心代码
+- ✅ 清晰的依赖关系
+- ✅ 纯接口定义
+- ✅ 中文注释
+
+**优势**:
+- ✅ **KISS 原则** - 简单就是美
+- ✅ **单一职责** - 只负责接口，不负责实现
+- ✅ **易于维护** - 代码少，出错概率低
+- ✅ **快速理解** - 新手也能快速掌握
+
+### 3. Wire 通信机制
+
+**设计思路**:
 
 ```python
-# ❌ 错误的做法
-class KimiSoul:
-    def __init__(self):
-        # 直接创建依赖，难以测试和扩展
-        self.llm = create_llm(...)
-        self.toolset = SimpleToolset(...)
-```
-
-**解决**: 使用工厂函数
-
-```python
-# ✅ 正确的做法
-async def create_soul(...) -> KimiSoul:
-    # 1. 创建依赖
-    config = load_config(...)
-    llm = create_llm(...)
-    runtime = Runtime(...)
-
-    # 2. 注入依赖
-    agent = await load_agent(...)
-    context = Context(...)
-
-    # 3. 创建并返回
-    return KimiSoul(agent, runtime, context=context)
+# 类似 Unix 的进程间通信
+Soul 执行 ←→ Wire ←→ UI 显示
 ```
 
 **优势**:
-- ✅ **单一职责**: 创建逻辑集中在工厂中
-- ✅ **易于测试**: 可以 mock 工厂函数
-- ✅ **灵活扩展**: 可以在工厂中添加新逻辑
+- ✅ **解耦设计** - UI 和 Soul 完全独立
+- ✅ **真正流式** - 异步消息队列实现流式输出
+- ✅ **易于扩展** - Protocol + 类型系统 + 简单接口
+- ✅ **健壮性** - 错误处理 + 优雅退出 + 资源清理
 
-### 3. 依赖注入自动化
+### 4. 异步优先设计
 
-**问题**: 手动传递依赖容易出错
-
-```python
-# ❌ 手动传递
-bash = Bash(approval=runtime.approval, config=runtime.config)
-read_file = ReadFile(approval=runtime.approval, config=runtime.config)
-```
-
-**解决**: 自动化注入
-
-```python
-# ✅ 自动注入
-tool_deps = {Approval: runtime.approval, Config: runtime.config}
-for param in inspect.signature(cls).parameters.values():
-    args.append(tool_deps[param.annotation])
-tool = cls(*args)
-```
-
-**优势**:
-- ✅ **减少样板代码**: 自动匹配并注入依赖
-- ✅ **类型安全**: 通过类型注解确保依赖正确
-- ✅ **易于扩展**: 新增依赖只需在映射中添加
-
-### 4. 异步任务协调
-
-**问题**: 多个异步任务需要精确协调
-
-**解决**: 使用 `asyncio.wait()` + 事件
-
-```python
-async def run_soul(...):
-    # 启动多个任务
-    ui_task = asyncio.create_task(ui_loop_fn(wire.ui_side))
-    soul_task = asyncio.create_task(soul.run(user_input))
-    cancel_task = asyncio.create_task(cancel_event.wait())
-
-    # 等待任意任务完成
-    done, pending = await asyncio.wait(
-        [soul_task, cancel_task],
-        return_when=asyncio.FIRST_COMPLETED
-    )
-
-    # 根据完成的任务处理
-    if cancel_event.is_set():
-        soul_task.cancel()  # 取消 Soul 任务
-```
-
-**优势**:
-- ✅ **精确控制**: 可以等待任意任务完成
-- ✅ **资源清理**: 使用 try/finally 确保资源清理
-- ✅ **错误处理**: 正确传播或捕获异常
-
-### 5. 状态机设计
-
-**Agent 循环状态机**:
-
-```mermaid
-stateDiagram-v2
-    [*] --> Step1
-    Step1 --> Step2 : 工具调用
-    Step2 --> Step3 : 工具完成
-    Step3 --> Compaction : Context 过长
-    Compaction --> Step2 : 压缩完成
-    Step2 --> Finished : 无工具调用
-    Step3 --> Finished : 达到目标
-    Step1 --> MaxSteps : 超过最大步数
-    MaxSteps --> [*]
-    Finished --> [*]
-```
-
-**优雅之处**:
-- ✅ **状态清晰**: 每一步都有明确的状态转换
-- ✅ **可扩展**: 易于添加新的状态转换
-- ✅ **健壮性**: 处理各种异常情况（取消、错误、时空穿越）
+**全程异步**:
+- ✅ **非阻塞** - 不会阻塞主线程
+- ✅ **并发友好** - 可以同时执行多个操作
+- ✅ **资源高效** - 使用异步 I/O
+- ✅ **实时响应** - UI 可以实时响应用户输入
+- ✅ **可扩展** - 容易扩展为流式处理
 
 ---
 
@@ -454,17 +413,22 @@ stateDiagram-v2
 
 ### 上层接口（被 UI 层调用）
 
-- **`create_soul()`** - 创建 Soul 实例的工厂函数
 - **`run_soul()`** - 运行 Soul 并连接到 UI Loop
 - **`wire_send()`** - 发送消息到 Wire（全局函数）
 - **`get_wire_or_none()`** - 获取当前 Wire
 
 ### 下层接口（调用底层组件）
 
-- **`load_agent()`** - 从规范文件加载 Agent
-- **`KimiSoul.run()`** - 运行 AI Agent 主循环
-- **`Context` API** - 管理对话上下文
-- **`Runtime` API** - 获取 LLM 和配置
+- **`Wire` 接口** - 异步消息传递
+- **`LLM` 接口** - 大语言模型调用
+- **`ContentPart`** - 消息内容类型
+
+### 异常接口
+
+- **`LLMNotSet`** - LLM 未配置错误
+- **`LLMNotSupported`** - LLM 能力不足错误
+- **`MaxStepsReached`** - 步骤数超限错误
+- **`RunCancelled`** - 运行被取消错误
 
 ---
 
@@ -472,43 +436,52 @@ stateDiagram-v2
 
 | 特性 | 官方实现 | 我们的实现 | 一致性 |
 |------|----------|------------|--------|
-| Protocol 定义 | Soul Protocol | Soul Protocol | ✅ |
-| 工厂模式 | create_soul() | create_soul() | ✅ |
-| 依赖注入 | load_agent() | load_agent() | ✅ |
-| Agent 循环 | KimiSoul._agent_loop() | KimiSoul._agent_loop() | ✅ |
-| 重试机制 | tenacity.retry | tenacity.retry | ✅ |
-| Wire 机制 | ContextVar + run_soul | ContextVar + run_soul | ✅ |
-| D-Mail 机制 | BackToTheFuture 异常 | BackToTheFuture 异常 | ✅ |
+| **Protocol 定义** | Soul Protocol | Soul Protocol | ✅ |
+| **异常类** | 4 个核心异常 | 4 个核心异常 | ✅ |
+| **Wire 机制** | ContextVar + run_soul | ContextVar + run_soul | ✅ |
+| **状态管理** | StatusSnapshot | StatusSnapshot | ✅ |
+| **类型注解** | 完整类型提示 | 完整类型提示 | ✅ |
+| **中文注释** | 无 | 完整中文注释 | ➕ |
+| **代码行数** | 180 行 | 180 行 | ✅ |
+
+**我们的优势**:
+- ➕ **中文注释** - 更易读的文档字符串
+- ➕ **本地化** - 符合中文开发者习惯
 
 ---
 
 ## 🎓 学习要点
 
-1. **Protocol 驱动设计**: 使用 Protocol 定义接口而非继承
-2. **工厂模式解耦**: 通过工厂函数创建复杂对象
-3. **依赖注入**: 使用 inspect.signature 自动注入依赖
-4. **异步任务协调**: 使用 asyncio.wait() 精确控制任务
-5. **状态机思维**: Agent 循环本质是状态机
-6. **重试机制**: 使用 tenacity 实现幂等性
-7. **资源管理**: try/finally 确保资源清理
-8. **上下文管理**: Context + Checkpoint 支持回滚
+1. **Protocol 驱动设计** - 使用 Protocol 定义接口而非继承
+2. **KISS 原则** - 简单就是美，复杂往往是不好的
+3. **Wire 通信** - 通过 ContextVar 实现全局状态管理
+4. **异步优先** - 全程异步，高性能
+5. **异常设计** - 语义清晰，便于捕获和处理
+6. **资源管理** - try/finally 确保资源清理
+7. **类型安全** - 完整类型注解，IDE 友好
+8. **解耦架构** - 接口与实现完全分离
 
 ---
 
 ## 🚀 总结
 
-Soul 模块是整个项目的**核心大脑**，它的优雅设计体现在：
+Soul 模块是整个项目的**核心大脑接口**，它的优雅设计体现在：
 
-1. **分层清晰**: Protocol → 实现 → 工厂解耦创建
-2. **依赖注入**: 自动化注入减少样板代码
-3. **状态管理**: Context + Checkpoint 支持复杂状态
-4. **任务协调**: 精确的异步任务控制
-5. **容错机制**: 重试 + 优雅退出保证可靠性
-6. **可扩展性**: 通过 Protocol 和工厂模式易于扩展
+1. **极简设计** - 180 行代码实现核心功能
+2. **协议驱动** - Protocol 定义统一接口
+3. **异步优先** - 全程异步，性能优异
+4. **解耦彻底** - UI 和 Soul 完全独立
+5. **通信优雅** - Wire 机制实现真正解耦
+6. **错误处理** - 语义清晰的异常体系
+7. **类型安全** - 完整类型注解
+8. **本地化** - 中文注释提升可读性
 
-这是整个 CLI 的智能引擎，为 Agent 提供了一个完整、优雅、可靠的运行环境。
+这是整个 CLI 的智能引擎接口，为 Agent 实现提供了一个简洁、优雅、可靠的契约。
+
+**核心理念**: **少即是多** - 最少的代码实现最多的功能！
 
 ---
 
 **创建时间**: 2025-11-22
-**基于文档**: my_cli/soul/*.py, docs/stage-04-08-soul-engine.md
+**基于文档**: my_cli/soul/__init__.py
+**重构日期**: 2025-11-22
