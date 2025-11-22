@@ -265,7 +265,7 @@ async def ui_loop(wire):
 # 新增 TUI UI
 async def tui_loop(wire_ui):
     async for msg in wire_ui.receive():
-        update_tui_screen(msg)
+            (msg)
 
 # 复用相同的 Wire
 await run_soul(soul, input, tui_loop, cancel_event)
