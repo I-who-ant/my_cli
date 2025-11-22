@@ -13,8 +13,6 @@ SendDMail 工具 - 向过去发送消息
 - Stage 20：实现 SendDMail 工具 ⭐
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any, override
 

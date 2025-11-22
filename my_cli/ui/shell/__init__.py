@@ -42,6 +42,7 @@ from rich.table import Table
 from rich.text import Text
 
 from my_cli.soul import LLMNotSet, RunCancelled, run_soul
+from my_cli.tools import ToolRejectedError
 from my_cli.ui.shell.console import console
 from my_cli.ui.shell.metacmd import get_meta_command
 from my_cli.ui.shell.prompt import CustomPromptSession, PromptMode, UserInput
@@ -269,7 +270,7 @@ class ShellApp:
 
     async def _run_soul_command(self, user_input: str) -> None:
         """
-        运行 Soul 命令（核心执行逻辑）
+        运行 Soul 命令（核心执行逻辑）⭐ Stage 33.3
 
         流程：
         1. 创建取消事件（用于 Ctrl+C）
@@ -278,14 +279,31 @@ class ShellApp:
 
         Args:
             user_input: 用户输入
+
+        对应源码：kimi-cli-fork/src/kimi_cli/ui/shell/__init__.py:196-205
         """
+        # ⭐ 对齐官方：安装 SIGINT 处理器（Ctrl+C）
+        from my_cli.utils.signals import install_sigint_handler
         cancel_event = asyncio.Event()
 
+        def _handler():
+            logger.debug("SIGINT received.")
+            cancel_event.set()
+
+        loop = asyncio.get_running_loop()
+        remove_sigint = install_sigint_handler(loop, _handler)
+
         try:
+            # ⭐ Stage 33.3: 使用 lambda 包装，传递 initial_status 参数
+            # 对应官方：lambda wire: visualize(wire, initial_status=..., cancel_event=...)
             await run_soul(
                 soul=self.soul,
                 user_input=user_input,
-                ui_loop_fn=visualize,  # 使用模块化的 visualize.py ⭐
+                ui_loop_fn=lambda wire: visualize(
+                    wire,
+                    initial_status=self.soul.status,
+                    cancel_event=cancel_event,
+                ),
                 cancel_event=cancel_event,
             )
 
@@ -293,6 +311,9 @@ class ShellApp:
             console.print("\n[red]❌ LLM 未设置（需要配置 API Key）[/red]\n")
         except ChatProviderError as e:
             console.print(f"\n[red]❌ LLM API 错误: {e}[/red]\n")
+        except ToolRejectedError as e:
+            # ⭐ Stage 33.13: 工具被用户拒绝（正常情况，不打印错误）
+            logger.info("Tool rejected by user: {brief}", brief=e.brief)
         except RunCancelled:
             # Ctrl+C 取消运行（不打印错误，已在外层处理）
             pass
@@ -301,6 +322,9 @@ class ShellApp:
             # TODO: Stage 19+ 添加 verbose 模式支持
             import traceback
             traceback.print_exc()
+        finally:
+            # ⭐ 对齐官方：清理信号处理器
+            remove_sigint()
 
 
 # ============================================================

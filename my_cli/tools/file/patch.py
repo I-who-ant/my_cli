@@ -1,4 +1,13 @@
-# Stage 27: 补丁应用工具实现
+"""
+PatchFile 工具 ⭐ Stage 27
+
+功能：应用 unified diff 格式的补丁到文件
+- 支持标准 unified diff 格式
+- 路径安全检查（必须在工作目录内）
+- 集成 Approval 系统（需要用户批准）
+
+对应源码：kimi-cli-fork/src/kimi_cli/tools/file/patch.py
+"""
 from pathlib import Path
 from typing import Any, Literal, override
 
@@ -14,20 +23,19 @@ from my_cli.tools.utils import ToolRejectedError, load_desc
 
 
 def _parse_patch(diff_bytes: bytes) -> patch_ng.PatchSet | None:
-    """Parse patch from bytes, returning PatchSet or None on error.
+    """从字节解析补丁，返回 PatchSet 或 None（解析失败时）
 
-    This wrapper provides type hints for the untyped patch_ng.fromstring function.
+    为无类型的 patch_ng.fromstring 函数提供类型提示。
     """
     result: patch_ng.PatchSet | Literal[False] = patch_ng.fromstring(diff_bytes)  # pyright: ignore[reportUnknownMemberType]
     return result if result is not False else None
 
 
 def _count_hunks(patch_set: patch_ng.PatchSet) -> int:
-    """Count total hunks across all items in a PatchSet.
+    """统计 PatchSet 中所有项的 hunk 总数
 
-    This wrapper provides type hints for the untyped patch_ng library.
-    From source code inspection: PatchSet.items is list[Patch], Patch.hunks is list[Hunk].
-    Type ignore needed because patch_ng lacks type annotations.
+    为无类型的 patch_ng 库提供类型提示。
+    PatchSet.items 是 list[Patch]，Patch.hunks 是 list[Hunk]。
     """
     items: list[patch_ng.Patch] = patch_set.items  # pyright: ignore[reportUnknownMemberType]
     # Each Patch has a hunks attribute (list[Hunk])
@@ -35,9 +43,9 @@ def _count_hunks(patch_set: patch_ng.PatchSet) -> int:
 
 
 def _apply_patch(patch_set: patch_ng.PatchSet, root: str) -> bool:
-    """Apply a patch to files under the given root directory.
+    """将补丁应用到指定根目录下的文件
 
-    This wrapper provides type hints for the untyped patch_ng.apply method.
+    为无类型的 patch_ng.apply 方法提供类型提示。
     """
     success: Any = patch_set.apply(root=root)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     return bool(success)  # pyright: ignore[reportUnknownArgumentType]
@@ -55,11 +63,11 @@ class PatchFile(CallableTool2[Params]):
 
     def __init__(self, builtin_args: BuiltinSystemPromptArgs, approval: Approval, **kwargs: Any):
         super().__init__(**kwargs)
-        self._work_dir = builtin_args.KIMI_WORK_DIR
+        self._work_dir = builtin_args.MY_CLI_WORK_DIR
         self._approval = approval
 
     def _validate_path(self, path: Path) -> ToolError | None:
-        """Validate that the path is safe to patch."""
+        """验证路径安全性（必须在工作目录内）"""
         # Check for path traversal attempts
         resolved_path = path.resolve()
         resolved_work_dir = Path(self._work_dir).resolve()

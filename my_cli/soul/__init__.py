@@ -52,12 +52,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from kosong.chat_provider.kimi import Kimi
 from kosong.message import ContentPart
 from pydantic import SecretStr
 
 from my_cli.config import LLMModel, LLMProvider, load_config
-from my_cli.soul.agent import Agent
 from my_cli.wire import Wire, WireMessage, WireUISide
 
 if TYPE_CHECKING:
@@ -65,7 +63,7 @@ if TYPE_CHECKING:
 
 
 # ============================================================
-# StatusSnapshot 定义 ⭐ 必须在导入 Runtime 之前定义
+# StatusSnapshot 定义 ⭐ 必须在导入 Agent 之前定义（避免循环导入）
 # ============================================================
 
 
@@ -82,12 +80,11 @@ class StatusSnapshot:
 
 
 # ============================================================
-# 导入 Runtime（依赖 StatusSnapshot）⭐
+# 导入依赖 StatusSnapshot 的模块 ⭐ 顺序很重要！
 # ============================================================
 
-# ⭐ 延迟导入 KimiSoul 以避免循环导入（官方做法）
-# from my_cli.soul.kimisoul import KimiSoul
 from my_cli.soul.runtime import Runtime  # noqa: E402
+from my_cli.soul.agent import Agent  # noqa: E402  ⭐ 必须在 StatusSnapshot 之后
 
 __all__ = [
     # 核心接口和工厂
@@ -281,7 +278,7 @@ class Soul(Protocol):
         ...
 
 
-def create_soul(
+async def create_soul(
     work_dir: Path,
     agent_name: str = "MyCLI Assistant",
     model_name: str | None = None,
@@ -382,19 +379,29 @@ def create_soul(
     )
 
     # ============================================================
-    # Stage 8：工具系统集成 ⭐
+    # Stage 8+：工具系统集成（Stage 33.8 对齐官方）⭐
     # ============================================================
 
-    # 7. 创建 SimpleToolset
-    from my_cli.tools.toolset import SimpleToolset
+    # 7. 加载 Agent（使用官方依赖注入机制）⭐ Stage 33.8
+    from my_cli.agentspec import DEFAULT_AGENT_FILE
+    from my_cli.soul.agent import load_agent
+    from my_cli.soul.context import Context
 
-    toolset = SimpleToolset()  # ⭐ SimpleToolset 自动注册 Bash/ReadFile/WriteFile
+    loaded_agent = await load_agent(
+        DEFAULT_AGENT_FILE,
+        runtime,
+        mcp_configs=[],  # Stage 33.8：空 MCP 配置，后续可扩展
+    )
 
-    # 8. 创建 KimiSoul（传入 toolset）⭐
+    # 8. 创建 Context（对齐官方）⭐ Stage 33.8
+    context = Context(session.history_file)
+    await context.restore()
+
+    # 9. 创建 KimiSoul（传入 Agent）⭐ Stage 33.8 对齐官方
     soul = KimiSoul(
-        agent=agent,
+        agent=loaded_agent,  # ⭐ 使用完整的 Agent 对象
         runtime=runtime,
-        toolset=toolset,  # ⭐ Stage 8：传入工具集
+        context=context,  # ⭐ Stage 33.8：对齐官方
     )
 
     return soul

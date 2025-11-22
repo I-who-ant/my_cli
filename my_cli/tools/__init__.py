@@ -20,8 +20,6 @@ Stage 7: 工具系统（Toolset）
 - Stage 17：extract_key_argument() 函数（UI 显示关键参数）⭐ 当前
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import cast
@@ -33,7 +31,9 @@ except ImportError:
 
 from kosong.utils.typing import JsonType
 
-__all__ = ["SkipThisTool", "extract_key_argument"]
+from my_cli.tools.utils import ToolRejectedError
+
+__all__ = ["SkipThisTool", "extract_key_argument", "ToolRejectedError"]
 
 
 class SkipThisTool(Exception):

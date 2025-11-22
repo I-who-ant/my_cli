@@ -10,20 +10,15 @@ MCP 工具集成模块 ⭐ Stage 23
 4. 集成 Approval 系统
 """
 
-from __future__ import annotations
+from typing import Any
 
-from typing import TYPE_CHECKING, Any
-
+import fastmcp
 import mcp
 from fastmcp.client.client import CallToolResult
 from kosong.message import AudioURLPart, ContentPart, ImageURLPart, TextPart
 from kosong.tooling import CallableTool, ToolError, ToolOk, ToolReturnType
 
-if TYPE_CHECKING:
-    import fastmcp
-
-    from my_cli.soul.runtime import Runtime
-
+from my_cli.soul.runtime import Runtime
 from my_cli.tools.utils import ToolRejectedError
 
 

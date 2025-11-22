@@ -14,7 +14,7 @@ _NEWLINE_RE = re.compile(r"[\r\n]+")
 
 
 def shorten_middle(text: str, width: int, remove_newline: bool = True) -> str:
-    """Shorten the text by inserting ellipsis in the middle."""
+    """在中间插入省略号来缩短文本"""
     if len(text) <= width:
         return text
     if remove_newline:
@@ -23,7 +23,7 @@ def shorten_middle(text: str, width: int, remove_newline: bool = True) -> str:
 
 
 def random_string(length: int = 8) -> str:
-    """Generate a random string of fixed length."""
+    """生成指定长度的随机字符串"""
     letters = string.ascii_lowercase
     return "".join(random.choice(letters) for _ in range(length))
 

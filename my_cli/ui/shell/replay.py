@@ -38,7 +38,7 @@ class _ReplayRun:
 
 
 async def replay_recent_history(history: Sequence[Message]) -> None:
-    """Replay the most recent user-initiated runs from the provided message history."""
+    """重放最近的用户发起的对话历史"""
     start_idx = _find_replay_start(history)
     if start_idx is None:
         return

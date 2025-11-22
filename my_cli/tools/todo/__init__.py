@@ -11,8 +11,6 @@ Stage 21.3: SetTodoList 工具实现
 对应设计：LEARNING_WORKFLOW3.md Stage 21
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any, Literal, override
 

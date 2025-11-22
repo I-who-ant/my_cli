@@ -40,6 +40,15 @@ setup(
 
     # 包配置
     packages=find_packages(),
+    package_data={
+        "my_cli": [
+            "agents/**/*.yaml",
+            "agents/**/*.md",
+            "prompts/*.md",
+            "tools/**/*.md",
+        ],
+    },
+    include_package_data=True,
     python_requires=">=3.10",
 
     # 依赖 ⭐ Stage 19.1: 切换到 Typer

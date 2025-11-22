@@ -10,20 +10,16 @@ Glob 工具 ⭐ Stage 27
 对应源码：kimi-cli-fork/src/kimi_cli/tools/file/glob.py
 """
 
-from __future__ import annotations
-
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, override
+from typing import Any, override
 
 from kosong.tooling import CallableTool2, ToolError, ToolOk, ToolReturnType
 from pydantic import BaseModel, Field
 
+from my_cli.soul.runtime import BuiltinSystemPromptArgs
 from my_cli.tools.utils import load_desc
 from my_cli.utils.path import list_directory
-
-if TYPE_CHECKING:
-    from my_cli.soul.runtime import BuiltinSystemPromptArgs
 
 MAX_MATCHES = 1000
 """最大匹配数"""
@@ -74,7 +70,7 @@ class Glob(CallableTool2[Params]):
             **kwargs: 其他参数
         """
         super().__init__(**kwargs)
-        self._work_dir = builtin_args.KIMI_WORK_DIR
+        self._work_dir = builtin_args.MY_CLI_WORK_DIR
 
     async def _validate_pattern(self, pattern: str) -> ToolError | None:
         """

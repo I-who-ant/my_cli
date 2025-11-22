@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 
 def _format_content_part(part: ContentPart) -> Text | Panel | Group:
-    """Format a single content part."""
+    """格式化单个内容部分"""
     match part:
         case TextPart(text=text):
             if text.strip().startswith("<system>") and text.strip().endswith("</system>"):
@@ -70,7 +70,7 @@ def _format_content_part(part: ContentPart) -> Text | Panel | Group:
 
 
 def _format_tool_call(tool_call: ToolCall) -> Panel:
-    """Format a tool call."""
+    """格式化工具调用"""
     args = tool_call.function.arguments or "{}"
     try:
         args_formatted = json.dumps(json.loads(args), indent=2)
@@ -94,7 +94,7 @@ def _format_tool_call(tool_call: ToolCall) -> Panel:
 
 
 def _format_message(msg: Message, index: int) -> Panel:
-    """Format a single message."""
+    """格式化单条消息"""
     role_colors = {
         "system": "magenta",
         "developer": "magenta",
@@ -145,7 +145,7 @@ def _format_message(msg: Message, index: int) -> Panel:
 
 @meta_command(kimi_soul_only=True)
 def debug(app: ShellApp, args: list[str]):
-    """Debug the context"""
+    """调试 Context 上下文信息"""
     assert isinstance(app.soul, KimiSoul)
 
     context = app.soul._context

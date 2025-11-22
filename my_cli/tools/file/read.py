@@ -11,19 +11,15 @@ ReadFile 工具 ⭐ Stage 27
 对应源码：kimi-cli-fork/src/kimi_cli/tools/file/read.py
 """
 
-from __future__ import annotations
-
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, override
+from typing import Any, override
 
 import aiofiles
 from kosong.tooling import CallableTool2, ToolError, ToolOk, ToolReturnType
 from pydantic import BaseModel, Field
 
+from my_cli.soul.runtime import BuiltinSystemPromptArgs
 from my_cli.tools.utils import load_desc, truncate_line
-
-if TYPE_CHECKING:
-    from my_cli.soul.runtime import BuiltinSystemPromptArgs
 
 # 读取限制
 MAX_LINES = 1000
@@ -93,7 +89,7 @@ class ReadFile(CallableTool2[Params]):
             **kwargs: 其他参数
         """
         super().__init__(**kwargs)
-        self._work_dir = builtin_args.KIMI_WORK_DIR
+        self._work_dir = builtin_args.MY_CLI_WORK_DIR
 
     @override
     async def __call__(self, params: Params) -> ToolReturnType:

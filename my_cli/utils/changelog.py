@@ -18,7 +18,7 @@ class ReleaseEntry(NamedTuple):
 
 
 def parse_changelog(md_text: str) -> dict[str, ReleaseEntry]:
-    """Parse a subset of Keep a Changelog-style markdown into a map:
+    """解析 Keep a Changelog 格式的 markdown 为映射：
     version -> (description, entries)
     """
     lines = md_text.splitlines()

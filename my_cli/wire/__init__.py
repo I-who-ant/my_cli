@@ -39,8 +39,8 @@ from typing import TYPE_CHECKING
 
 from kosong.message import ContentPart, ToolCallPart
 
-# ⭐ 官方做法：使用 TYPE_CHECKING 避免循环导入
-# 参考：kimi-cli-fork/src/kimi_cli/wire/__init__.py:10-11
+from my_cli.utils.logging import logger
+
 if TYPE_CHECKING:
     from my_cli.wire.message import ApprovalRequest, Event
 
@@ -128,13 +128,12 @@ class WireSoulSide:
         - 如果队列已关闭，静默失败（不抛异常）
         - ContentPart 和 ToolCallPart 不打印日志（数量太多）
         """
-        # Stage 6: 简化版（不打印日志）
-        # Stage 8+: 添加日志（但跳过 ContentPart/ToolCallPart）
+        if not isinstance(msg, ContentPart | ToolCallPart):
+            logger.debug("Sending wire message: {msg}", msg=msg)
         try:
             self._queue.put_nowait(msg)
         except asyncio.QueueShutDown:
-            # 队列已关闭，静默失败
-            pass
+            logger.info("Failed to send wire message, queue is shut down: {msg}", msg=msg)
 
 
 class WireUISide:
@@ -163,6 +162,8 @@ class WireUISide:
         - 此方法会阻塞，直到有消息或队列关闭
         """
         msg = await self._queue.get()
+        if not isinstance(msg, ContentPart | ToolCallPart):
+            logger.debug("Receiving wire message: {msg}", msg=msg)
         return msg
 
     def receive_nowait(self) -> WireMessage | None:
@@ -180,39 +181,6 @@ class WireUISide:
             msg = self._queue.get_nowait()
         except asyncio.QueueEmpty:
             return None
+        if not isinstance(msg, ContentPart | ToolCallPart):
+            logger.debug("Receiving wire message: {msg}", msg=msg)
         return msg
-
-
-# ============================================================
-# TODO: Stage 8+ 添加日志支持（参考官方）
-# ============================================================
-# 官方参考：kimi-cli-fork/src/kimi_cli/wire/__init__.py
-#
-# from kimi_cli.utils.logging import logger
-#
-# class WireSoulSide:
-#     def send(self, msg: WireMessage) -> None:
-#         # 跳过 ContentPart 和 ToolCallPart（太多了）
-#         if not isinstance(msg, ContentPart | ToolCallPart):
-#             logger.debug("Sending wire message: {msg}", msg=msg)
-#         try:
-#             self._queue.put_nowait(msg)
-#         except asyncio.QueueShutDown:
-#             logger.info("Failed to send wire message, queue is shut down: {msg}", msg=msg)
-#
-# class WireUISide:
-#     async def receive(self) -> WireMessage:
-#         msg = await self._queue.get()
-#         if not isinstance(msg, ContentPart | ToolCallPart):
-#             logger.debug("Receiving wire message: {msg}", msg=msg)
-#         return msg
-#
-#     def receive_nowait(self) -> WireMessage | None:
-#         try:
-#             msg = self._queue.get_nowait()
-#         except asyncio.QueueEmpty:
-#             return None
-#         if not isinstance(msg, ContentPart | ToolCallPart):
-#             logger.debug("Receiving wire message: {msg}", msg=msg)
-#         return msg
-# ============================================================

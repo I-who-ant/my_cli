@@ -26,7 +26,6 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from my_cli.agentspec import DEFAULT_AGENT_FILE
 from my_cli.config import LLMModel, LLMProvider, load_config
 from my_cli.llm import augment_provider_with_env_vars, create_llm
 from my_cli.session import Session
@@ -36,7 +35,7 @@ from my_cli.soul.context import Context
 from my_cli.soul.kimisoul import KimiSoul
 from my_cli.soul.runtime import Runtime
 from my_cli.utils.logging import StreamToLogger, logger
-from my_cli.utils.path import shorten_home
+
 
 
 def enable_logging(debug: bool = False) -> None:
@@ -50,7 +49,7 @@ def enable_logging(debug: bool = False) -> None:
     if debug:
         logger.enable("kosong")
     logger.add(
-        get_share_dir() / "logs" / "kimi.log",
+        get_share_dir() / "logs" / "my_cli.log",
         level="TRACE" if debug else "INFO",
         rotation="06:00",
         retention="10 days",

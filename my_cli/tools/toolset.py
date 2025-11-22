@@ -9,10 +9,7 @@ Stage 7-8: 简单Toolset实现（修复版）
 对应源码：kosong的Toolset协议 + 官方SimpleToolset实现
 """
 
-from __future__ import annotations
-
 import asyncio
-from collections.abc import Sequence
 
 from kosong.message import ToolCall
 from kosong.tooling import CallableTool2, Tool, ToolResult, ToolResultFuture, HandleResult

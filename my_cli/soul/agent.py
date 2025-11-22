@@ -16,19 +16,19 @@ import inspect
 import string
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from kosong.tooling import CallableTool, Toolset
+from kosong.tooling import CallableTool, CallableTool2, Toolset
 
 from my_cli.agentspec import ResolvedAgentSpec, load_agent_spec
+from my_cli.config import Config
+from my_cli.session import Session
+from my_cli.soul.approval import Approval
+from my_cli.soul.denwarenji import DenwaRenji
+from my_cli.soul.runtime import BuiltinSystemPromptArgs, Runtime
+from my_cli.soul.toolset import CustomToolset
+from my_cli.tools import SkipThisTool
 from my_cli.utils.logging import logger
-
-if TYPE_CHECKING:
-    from my_cli.config import Config
-    from my_cli.session import Session
-    from my_cli.soul.approval import Approval
-    from my_cli.soul.runtime import BuiltinSystemPromptArgs, Runtime
-    from my_cli.soul.toolset import CustomToolset
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -82,31 +82,16 @@ async def load_agent(
         runtime.builtin_args,
     )
 
-    # 工具依赖注入映射
-    from my_cli.soul.toolset import CustomToolset
-
+    # 工具依赖注入映射（与官方保持一致）
     tool_deps: dict[type, Any] = {
         ResolvedAgentSpec: agent_spec,
         Runtime: runtime,
+        Config: runtime.config,
+        BuiltinSystemPromptArgs: runtime.builtin_args,
+        Session: runtime.session,
+        DenwaRenji: runtime.denwa_renji,
+        Approval: runtime.approval,
     }
-
-    # 可选依赖（如果 runtime 有这些属性）
-    if hasattr(runtime, "config"):
-        from my_cli.config import Config
-
-        tool_deps[Config] = runtime.config
-    if hasattr(runtime, "builtin_args"):
-        from my_cli.soul.runtime import BuiltinSystemPromptArgs
-
-        tool_deps[BuiltinSystemPromptArgs] = runtime.builtin_args
-    if hasattr(runtime, "session"):
-        from my_cli.session import Session
-
-        tool_deps[Session] = runtime.session
-    if hasattr(runtime, "approval"):
-        from my_cli.soul.approval import Approval
-
-        tool_deps[Approval] = runtime.approval
 
     # 处理工具列表
     tools = agent_spec.tools
@@ -118,7 +103,7 @@ async def load_agent(
     toolset = CustomToolset()
     bad_tools = _load_tools(toolset, tools, tool_deps)
     if bad_tools:
-        logger.warning("Failed to load tools: {bad_tools}", bad_tools=bad_tools)
+        raise ValueError(f"Invalid tools: {bad_tools}")
 
     # 加载 MCP 工具
     if mcp_configs:
@@ -167,95 +152,67 @@ def _load_system_prompt(
         return system_prompt
 
 
+type ToolType = CallableTool | CallableTool2[Any]
+
+
 def _load_tools(
     toolset: CustomToolset,
-    tools: list[str],
-    deps: dict[type, Any],
+    tool_paths: list[str],
+    dependencies: dict[type[Any], Any],
 ) -> list[str]:
     """
-    加载工具到 Toolset ⭐ Stage 26
+    加载工具到 Toolset ⭐ Stage 33 对齐官方
 
-    工具字符串格式：module:ClassName
-    例如：my_cli.tools.bash:Bash
-
-    支持依赖注入：根据工具构造函数的类型注解自动注入依赖。
-
-    Args:
-        toolset: 目标工具集
-        tools: 工具列表
-        deps: 依赖注入映射
-
-    Returns:
-        list[str]: 加载失败的工具列表
-
-    对应源码：kimi-cli-fork/src/kimi_cli/soul/agent.py:100-149
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/agent.py:100-119
     """
     bad_tools: list[str] = []
-
-    for tool_str in tools:
+    for tool_path in tool_paths:
         try:
-            tool = _load_tool(tool_str, deps)
-            if tool is not None:
-                toolset.register_tool(tool)
-                logger.debug("Loaded tool: {tool}", tool=tool_str)
-        except Exception as e:
-            logger.warning("Failed to load tool {tool}: {error}", tool=tool_str, error=e)
-            bad_tools.append(tool_str)
-
+            tool = _load_tool(tool_path, dependencies)
+        except SkipThisTool:
+            logger.info("Skipping tool: {tool_path}", tool_path=tool_path)
+            continue
+        if tool:
+            toolset += tool
+        else:
+            bad_tools.append(tool_path)
+    logger.info("Loaded tools: {tools}", tools=[tool.name for tool in toolset.tools])
+    if bad_tools:
+        logger.error("Bad tools: {bad_tools}", bad_tools=bad_tools)
     return bad_tools
 
 
-def _load_tool(tool_str: str, deps: dict[type, Any]) -> CallableTool | None:
+def _load_tool(tool_path: str, dependencies: dict[type[Any], Any]) -> ToolType | None:
     """
-    加载单个工具
+    加载单个工具（使用位置参数依赖注入）⭐ Stage 33 对齐官方
 
-    Args:
-        tool_str: 工具字符串（格式：module:ClassName）
-        deps: 依赖注入映射
+    对应源码：kimi-cli-fork/src/kimi_cli/soul/agent.py:122-141
 
-    Returns:
-        CallableTool | None: 工具实例，或 None（如果加载失败）
+    ⚠️ 关键：必须使用 inspect.signature(cls) 而不是 cls.__init__
+    原因：在有 from __future__ import annotations 时，
+          - signature(cls) 能正确获取类型对象
+          - signature(cls.__init__) 会得到字符串形式的注解
     """
-    if ":" not in tool_str:
-        raise ValueError(f"Invalid tool format: {tool_str} (expected module:ClassName)")
-
-    module_path, class_name = tool_str.rsplit(":", 1)
-
-    # 导入模块
+    logger.debug("Loading tool: {tool_path}", tool_path=tool_path)
+    module_name, class_name = tool_path.rsplit(":", 1)
     try:
-        module = importlib.import_module(module_path)
-    except ImportError as e:
-        raise ImportError(f"Failed to import module {module_path}: {e}") from e
+        module = importlib.import_module(module_name)
+    except ImportError:
+        return None
+    cls = getattr(module, class_name, None)
+    if cls is None:
+        return None
 
-    # 获取工具类
-    if not hasattr(module, class_name):
-        raise AttributeError(f"Module {module_path} has no attribute {class_name}")
-
-    tool_class = getattr(module, class_name)
-
-    # 检查是否是 CallableTool
-    if not (isinstance(tool_class, type) and issubclass(tool_class, CallableTool)):
-        raise TypeError(f"{tool_str} is not a CallableTool subclass")
-
-    # 依赖注入
-    init_signature = inspect.signature(tool_class.__init__)
-    kwargs: dict[str, Any] = {}
-
-    for param_name, param in init_signature.parameters.items():
-        if param_name == "self":
-            continue
-        if param.annotation in deps:
-            kwargs[param_name] = deps[param.annotation]
-        elif param.default is inspect.Parameter.empty:
-            # 必需参数但没有提供依赖
-            logger.warning(
-                "Tool {tool} requires {param} but no dependency provided",
-                tool=tool_str,
-                param=param_name,
-            )
-
-    # 创建工具实例
-    return tool_class(**kwargs)
+    args: list[Any] = []
+    for param in inspect.signature(cls).parameters.values():
+        if param.kind == inspect.Parameter.KEYWORD_ONLY:
+            # 遇到 keyword-only 参数时停止注入依赖
+            break
+        # 所有位置参数都应该是需要注入的依赖
+        if param.annotation not in dependencies:
+            raise ValueError(f"Tool dependency not found: {param.annotation}")
+        args.append(dependencies[param.annotation])
+    return cls(*args)
 
 
 async def _load_mcp_tools(

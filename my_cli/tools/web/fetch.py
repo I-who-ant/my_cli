@@ -12,8 +12,6 @@ Stage 21.2: FetchURL 工具实现
 对应源码：kimi-cli-fork/src/kimi_cli/tools/web/fetch.py
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import override
 

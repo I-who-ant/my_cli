@@ -9,20 +9,16 @@ WriteFile 工具 ⭐ Stage 27
 对应源码：kimi-cli-fork/src/kimi_cli/tools/file/write.py
 """
 
-from __future__ import annotations
-
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, override
+from typing import Any, Literal, override
 
 import aiofiles
 from kosong.tooling import CallableTool2, ToolError, ToolOk, ToolReturnType
 from pydantic import BaseModel, Field
 
+from my_cli.soul.approval import Approval
+from my_cli.soul.runtime import BuiltinSystemPromptArgs
 from my_cli.tools.utils import ToolRejectedError, load_desc
-
-if TYPE_CHECKING:
-    from my_cli.soul.approval import Approval
-    from my_cli.soul.runtime import BuiltinSystemPromptArgs
 
 
 class Params(BaseModel):
@@ -68,7 +64,7 @@ class WriteFile(CallableTool2[Params]):
             **kwargs: 其他参数
         """
         super().__init__(**kwargs)
-        self._work_dir = builtin_args.KIMI_WORK_DIR
+        self._work_dir = builtin_args.MY_CLI_WORK_DIR
         self._approval = approval
 
     def _validate_path(self, path: Path) -> ToolError | None:

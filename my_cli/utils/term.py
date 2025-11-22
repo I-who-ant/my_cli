@@ -15,7 +15,7 @@ import time
 
 
 def ensure_new_line() -> None:
-    """Ensure the next prompt starts at column 0 regardless of prior command output."""
+    """确保下一个提示符从第0列开始，无论之前的命令输出如何"""
     if not sys.stdout.isatty() or not sys.stdin.isatty():
         return
 

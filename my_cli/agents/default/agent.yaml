@@ -5,17 +5,20 @@ agent:
   system_prompt_args:
     ROLE_ADDITIONAL: ""
   tools:
-    # ⭐ Stage 7-8 已实现的工具
-    - "my_cli.tools.bash:Bash"
+    # 文件操作工具
     - "my_cli.tools.file:ReadFile"
     - "my_cli.tools.file:WriteFile"
-    # TODO: Stage 9+ 待实现的工具
-    # - "my_cli.tools.task:Task"
-    # - "my_cli.tools.think:Think"
-    # - "my_cli.tools.todo:SetTodoList"
-    # - "my_cli.tools.file:Glob"
-    # - "my_cli.tools.file:Grep"
-    # - "my_cli.tools.file:StrReplaceFile"
-    # - "my_cli.tools.file:PatchFile"
-    # - "my_cli.tools.web:SearchWeb"
-    # - "my_cli.tools.web:FetchURL"
+    - "my_cli.tools.file:Glob"
+    - "my_cli.tools.file:Grep"
+    - "my_cli.tools.file:StrReplaceFile"
+    - "my_cli.tools.file:PatchFile"
+    # 命令行工具
+    - "my_cli.tools.bash:Bash"
+    # 网络工具
+    - "my_cli.tools.web:SearchWeb"
+    - "my_cli.tools.web:FetchURL"
+    # 高级工具
+    - "my_cli.tools.task:Task"
+    - "my_cli.tools.todo:SetTodoList"
+    - "my_cli.tools.think:Think"
+    # - "my_cli.tools.dmail:SendDMail"  # 时间旅行功能，暂不启用

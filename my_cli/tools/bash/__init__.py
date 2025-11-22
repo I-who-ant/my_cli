@@ -14,17 +14,16 @@ Stage 7 增强：Bash 工具实现
 对应源码：kimi-cli-fork/src/kimi_cli/tools/bash/__init__.py
 """
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
-from typing import override
+from typing import Any, override
 
 from kosong.tooling import CallableTool2, ToolReturnType
 from pydantic import BaseModel, Field
 
-from my_cli.tools.utils import ToolResultBuilder, load_desc
+from my_cli.soul.approval import Approval
+from my_cli.tools.utils import ToolRejectedError, ToolResultBuilder, load_desc
 
 __all__ = ["Bash"]
 
@@ -55,8 +54,11 @@ class Bash(CallableTool2[Params]):
     - ✅ 使用 ToolResultBuilder（输出限制）
     - ✅ 使用 load_desc()（描述管理）
 
+    Stage 33.7 对齐：
+    - ✅ 集成 Approval 系统（危险操作前请求批准）⭐
+
     示例：
-        bash = Bash()
+        bash = Bash(approval=approval)
         result = await bash.call({"command": "ls -la", "timeout": 30})
     """
 
@@ -64,11 +66,29 @@ class Bash(CallableTool2[Params]):
     description: str = load_desc(Path(__file__).parent / "bash.md")  # ⭐ 从文件加载
     params: type[Params] = Params
 
+    def __init__(self, approval: Approval, **kwargs: Any):
+        """
+        初始化 Bash 工具 ⭐ Stage 33.7 对齐
+
+        Args:
+            approval: Approval 实例（通过依赖注入自动传递）
+        """
+        super().__init__(**kwargs)
+        self._approval = approval
+
     @override
     async def __call__(self, params: Params) -> ToolReturnType:
         """执行 bash 命令（使用 ToolResultBuilder 限制输出）"""
         # ⭐ 创建结果构建器（自动限制输出大小）
         builder = ToolResultBuilder()
+
+        # ⭐ Stage 33.7 对齐官方：执行前请求批准
+        if not await self._approval.request(
+            self.name,
+            "run shell command",
+            f"Run command `{params.command}`",
+        ):
+            return ToolRejectedError()
 
         def stdout_cb(line: bytes):
             """标准输出回调"""

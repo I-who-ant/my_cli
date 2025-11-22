@@ -12,8 +12,6 @@ Stage 21.2: SearchWeb 工具实现（Moonshot Search API）
 对应源码：kimi-cli-fork/src/kimi_cli/tools/web/search.py
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any, override
 

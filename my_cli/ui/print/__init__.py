@@ -42,7 +42,7 @@ from pathlib import Path
 
 from kosong.chat_provider import ChatProviderError
 
-from my_cli.cli import OutputFormat
+from my_cli.cli import OutputFormat, InputFormat
 from my_cli.soul import LLMNotSet, RunCancelled, create_soul, run_soul
 from my_cli.ui.print.visualize import visualize
 
@@ -65,16 +65,28 @@ class PrintUI:
     - Stage 6：Wire 机制 + 流式输出 ✅
     """
 
-    def __init__(self, verbose: bool = False, work_dir: Path | None = None):
+    def __init__(
+        self,
+        verbose: bool = False,
+        work_dir: Path | None = None,
+        input_format: InputFormat = "text",
+        output_format: OutputFormat = "text",
+    ):
         """
-        初始化 Print UI
+        初始化 Print UI ⭐ Stage 33.5
 
         Args:
             verbose: 是否显示详细日志
             work_dir: 工作目录（默认当前目录）
+            input_format: 输入格式（text 或 stream-json）
+            output_format: 输出格式（text 或 stream-json）
+
+        对应官方：kimi-cli-fork/src/kimi_cli/ui/print/__init__.py:32-42
         """
         self.verbose = verbose
         self.work_dir = work_dir or Path.cwd()
+        self.input_format = input_format
+        self.output_format = output_format
 
     async def run(self, command: str | None = None) -> None:
         """
@@ -95,7 +107,7 @@ class PrintUI:
 
         # 1. 创建 Soul
         try:
-            soul = create_soul(work_dir=self.work_dir)
+            soul = await create_soul(work_dir=self.work_dir)
         except FileNotFoundError as e:
             print(f"\n❌ 配置文件错误: {e}\n")
             print("请先运行 'mycli init' 创建配置文件")
@@ -122,7 +134,7 @@ class PrintUI:
             await run_soul(
                 soul=soul,
                 user_input=command,
-                ui_loop_fn=partial(visualize, "text"),  # ⭐ 官方做法：visualize 就是 UI loop 函数！
+                ui_loop_fn=partial(visualize, self.output_format),  # ⭐ 官方做法：传递 output_format！
                 cancel_event=cancel_event,
             )
 

@@ -2,7 +2,7 @@ import asyncio
 import inspect
 import json
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Self, get_type_hints
 
 from kosong.message import ToolCall
 from kosong.tooling import (

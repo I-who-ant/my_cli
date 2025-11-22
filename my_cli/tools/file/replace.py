@@ -1,4 +1,14 @@
-# Stage 27: 字符串替换工具实现
+"""
+StrReplaceFile 工具 ⭐ Stage 27
+
+功能：字符串替换编辑文件
+- 支持单次替换和全局替换
+- 支持批量编辑（多个替换操作）
+- 路径安全检查（必须在工作目录内）
+- 集成 Approval 系统（需要用户批准）
+
+对应源码：kimi-cli-fork/src/kimi_cli/tools/file/replace.py
+"""
 from pathlib import Path
 from typing import Any, override
 
@@ -35,11 +45,11 @@ class StrReplaceFile(CallableTool2[Params]):
 
     def __init__(self, builtin_args: BuiltinSystemPromptArgs, approval: Approval, **kwargs: Any):
         super().__init__(**kwargs)
-        self._work_dir = builtin_args.KIMI_WORK_DIR
+        self._work_dir = builtin_args.MY_CLI_WORK_DIR
         self._approval = approval
 
     def _validate_path(self, path: Path) -> ToolError | None:
-        """Validate that the path is safe to edit."""
+        """验证路径安全性（必须在工作目录内）"""
         # Check for path traversal attempts
         resolved_path = path.resolve()
         resolved_work_dir = self._work_dir.resolve()
@@ -56,7 +66,7 @@ class StrReplaceFile(CallableTool2[Params]):
         return None
 
     def _apply_edit(self, content: str, edit: Edit) -> str:
-        """Apply a single edit to the content."""
+        """应用单个编辑到内容"""
         if edit.replace_all:
             return content.replace(edit.old, edit.new)
         else:

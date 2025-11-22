@@ -10,8 +10,6 @@ Stage 7 增强：工具辅助函数
 对应源码：kimi-cli-fork/src/kimi_cli/tools/utils.py
 """
 
-from __future__ import annotations
-
 import re
 import string
 from pathlib import Path
