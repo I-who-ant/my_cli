@@ -1,3 +1,4 @@
+
 """
 App - 应用层框架
 
@@ -14,6 +15,7 @@ App - 应用层框架
 - Stage 18：Session 管理集成 ⭐ 完整实现
 - Stage 18+：完整应用层
 """
+
 
 from __future__ import annotations
 
@@ -48,6 +50,7 @@ def enable_logging(debug: bool = False) -> None:
     """
     if debug:
         logger.enable("kosong")
+    # 只写日志文件，不输出到 stderr
     logger.add(
         get_share_dir() / "logs" / "my_cli.log",
         level="TRACE" if debug else "INFO",
